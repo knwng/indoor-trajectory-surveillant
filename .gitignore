@@ -6,6 +6,17 @@ __pycache__/
 # C extensions
 *.so
 
+# dataset
+reid/Market-1501-v15.09.15/
+reid/Market-1501-v15.09.15/*
+*.jpg
+
+# vim cache
+*.sw[a-z]
+
+# weights
+reid/market1501_weights/
+
 # Distribution / packaging
 .Python
 env/
