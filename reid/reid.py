@@ -74,6 +74,7 @@ def prepare_image(img_dir, height, width):
     return img
 
 if __name__ == '__main__':
+    # TEST
     reid = ReIdentifier(model_name="resnet_v1_50", head_name="fc1024", model_ckpt="./market1501_weights/checkpoint-25000")
     img_dirs = ['./query.jpg', './same.jpg', './diff.jpg']
     imgs = [prepare_image(_dir, INPUT_HEIGHT, INPUT_WIDTH) for _dir in img_dirs]
