@@ -3,7 +3,10 @@
 from argparse import ArgumentParser
 from importlib import import_module
 from itertools import count
+import loss
+from loss import cdist
 import os
+import cv2
 
 import h5py
 import json
@@ -13,6 +16,8 @@ import tensorflow as tf
 from aggregators import AGGREGATORS
 import common
 
+INPUT_HEIGHT = 256
+INPUT_WIDTH = 128
 
 def flip_augment(image, fid, pid):
     """ Returns both the original and the horizontal flip of an image. """
@@ -39,31 +44,40 @@ def five_crops(image, crop_size):
 
 class ReIdentifier(object):
 
-    def __init__(self, model_name, head_name, model_ckpt, surveillant_map):
+    def __init__(self, model_name, head_name, model_ckpt, surveillant_map=None):
         model = import_module('nets.' + model_name)
         head = import_module('heads.' + head_name)
 
-        self.image = tf.placeholder(dtype=tf.float32, shape=[None, 224, 224, 3], name='image')
+        self.image = tf.placeholder(dtype=tf.float32, shape=[None, INPUT_WIDTH, INPUT_HEIGHT, 3], name='image')
 
         self.endpoints, body_prefix = model.endpoints(self.image, is_training=False)
         with tf.name_scope('head'):
             self.endpoints = head.head(self.endpoints, 128, is_training=False)
-        self.sess = tf.Session(config=config)
+        self.sess = tf.Session()
         tf.train.Saver().restore(self.sess, model_ckpt)
-        pass
+        self.surveillant_map = surveillant_map
 
     def embed(self, image):
         emb = self.sess.run(self.endpoints['emb'], feed_dict={self.image:image})
         return emb
 
-    def dist(self, ftr1, ftr2, dist_type='euclidean'):
-        pass
+    def dist(self, ftr1, ftr2, single_batch=True, metric='euclidean'):
+        if single_batch:
+            return np.sqrt(np.sum((ftr1 - ftr2) ** 2))
+        else:
+            raise NotImplementedError
 
-    def reid(self, img1, img2):
-        pass
 
-    def search(self, query_image):
-        pass
+def prepare_image(img_dir, height, width):
+    img = cv2.imread(img_dir)
+    img = cv2.resize(img, (height, width))
+    return img
 
 if __name__ == '__main__':
-    reid = ReIdentifier()
+    reid = ReIdentifier(model_name="resnet_v1_50", head_name="fc1024", model_ckpt="./market1501_weights/checkpoint-25000")
+    img_dirs = ['./query.jpg', './same.jpg', './diff.jpg']
+    imgs = [prepare_image(_dir, INPUT_HEIGHT, INPUT_WIDTH) for _dir in img_dirs]
+    embs = reid.embed(imgs)
+    dist_same = reid.dist(embs[0], embs[1])
+    dist_diff = reid.dist(embs[0], embs[2])
+    print('dist | same {} | diff {}'.format(dist_same, dist_diff))
