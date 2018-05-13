@@ -17,6 +17,9 @@ reid/Market-1501-v15.09.15/*
 # weights
 reid/market1501_weights/
 
+# MAC specified
+.DS_Store
+
 # Distribution / packaging
 .Python
 env/
