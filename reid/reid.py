@@ -7,6 +7,7 @@ import loss
 from loss import cdist
 import os
 import cv2
+import time
 
 import h5py
 import json
@@ -16,13 +17,11 @@ import tensorflow as tf
 from aggregators import AGGREGATORS
 import common
 
-INPUT_HEIGHT = 256
-INPUT_WIDTH = 128
 
-def flip_augment(image, fid, pid):
+def flip_augment(image):
     """ Returns both the original and the horizontal flip of an image. """
-    images = tf.stack([image, tf.reverse(image, [1])])
-    return images, [fid]*2, [pid]*2
+    flipped = cv2.flip(image, 1)
+    return [image, flipped]
 
 
 def five_crops(image, crop_size):
@@ -42,13 +41,16 @@ def five_crops(image, crop_size):
     return center, top_left, top_right, bottom_left, bottom_right
 
 
+
+
 class ReIdentifier(object):
 
     def __init__(self, model_name, head_name, model_ckpt, surveillant_map=None):
         model = import_module('nets.' + model_name)
         head = import_module('heads.' + head_name)
 
-        self.image = tf.placeholder(dtype=tf.float32, shape=[None, INPUT_WIDTH, INPUT_HEIGHT, 3], name='image')
+        # self.image = tf.placeholder(dtype=tf.float32, shape=[None, INPUT_WIDTH, INPUT_HEIGHT, 3], name='image')
+        self.image = tf.placeholder(dtype=tf.float32, shape=[None, INPUT_HEIGHT, INPUT_WIDTH, 3], name='image')
 
         self.endpoints, body_prefix = model.endpoints(self.image, is_training=False)
         with tf.name_scope('head'):
@@ -57,28 +59,104 @@ class ReIdentifier(object):
         tf.train.Saver().restore(self.sess, model_ckpt)
         self.surveillant_map = surveillant_map
 
-    def embed(self, image):
-        emb = self.sess.run(self.endpoints['emb'], feed_dict={self.image:image})
+    def embed(self, image, input_size, augmentation=False, pre_crop_size=None):
+        if augmentation and (pre_crop_size is None or input_size is None):
+            print('Specify pre_crop_size and input_size for test time augmentation')
+            raise ValueError
+        if np.array(image).ndim == 3:
+            image = image[np.newaxis, :]
+        if augmentation:
+            emb = []
+            for img in image:
+                # output: [288, 144, 3]
+                img = cv2.resize(img, tuple(pre_crop_size))
+                aug_img = self.testtime_augmentation(img, input_size)
+                _emb = self.sess.run(self.endpoints['emb'], feed_dict={self.image:aug_img})
+                emb.append(np.mean(_emb, axis=0))
+        else:
+            image = [cv2.resize(img, tuple(input_size[::-1])) for img in image]
+            emb = self.sess.run(self.endpoints['emb'], feed_dict={self.image:image})
         return emb
 
-    def dist(self, ftr1, ftr2, single_batch=True, metric='euclidean'):
+    def testtime_augmentation(self, image, crop_size):
+        # horizontal flip
+        flipped = cv2.flip(image, 1)
+        image_size = image.shape[:2]
+        crop_margin = np.subtract(image_size, crop_size)
+        assert(crop_margin[0] >= 0 and crop_margin[1] >= 0)
+        p_top_left = np.floor_divide(crop_margin, 2).astype(np.int)
+        p_bottom_right = p_top_left + crop_size
+        
+        center       = image[p_top_left[0]:p_bottom_right[0], p_top_left[1]:p_bottom_right[1], :]
+        top_left     = image[:-crop_margin[0], :-crop_margin[1], :]
+        top_right    = image[:-crop_margin[0], crop_margin[1]:, :]
+        bottom_left  = image[crop_margin[0]:, :-crop_margin[1], :]
+        bottom_right = image[crop_margin[0]:, crop_margin[1]:, :]
+
+        f_center       = flipped[p_top_left[0]:p_bottom_right[0], p_top_left[1]:p_bottom_right[1], :]
+        f_top_left     = flipped[:-crop_margin[0], :-crop_margin[1], :]
+        f_top_right    = flipped[:-crop_margin[0], crop_margin[1]:, :]
+        f_bottom_left  = flipped[crop_margin[0]:, :-crop_margin[1], :]
+        f_bottom_right = flipped[crop_margin[0]:, crop_margin[1]:, :]
+
+        return np.stack([cv2.resize(image, tuple(crop_size[::-1])), cv2.resize(flipped, tuple(crop_size[::-1])), 
+                center, top_left, top_right, bottom_left, bottom_right,
+                f_center, f_top_left, f_top_right, f_bottom_left, f_bottom_right], axis=0)
+
+    def score(self, ftr1, ftr2, single_batch=True, metric='euclidean'):
         if single_batch:
-            return np.sqrt(np.sum((ftr1 - ftr2) ** 2))
+            return 1. / (1. + np.sqrt(np.sum((ftr1 - ftr2) ** 2)))
         else:
             raise NotImplementedError
 
 
 def prepare_image(img_dir, height, width):
     img = cv2.imread(img_dir)
-    img = cv2.resize(img, (height, width))
+    # img = cv2.resize(img, (height, width))
     return img
 
+def show_stats(name, x):
+    print('stats of {} | max {} | mean {} | min {}'.format(name, np.max(x), np.mean(x), np.min(x)))
+    return
+
 if __name__ == '__main__':
+    INPUT_HEIGHT = 256
+    INPUT_WIDTH = 128
+
     # TEST
     reid = ReIdentifier(model_name="resnet_v1_50", head_name="fc1024", model_ckpt="./market1501_weights/checkpoint-25000")
-    img_dirs = ['./query.jpg', './same.jpg', './diff.jpg']
-    imgs = [prepare_image(_dir, INPUT_HEIGHT, INPUT_WIDTH) for _dir in img_dirs]
-    embs = reid.embed(imgs)
-    dist_same = reid.dist(embs[0], embs[1])
-    dist_diff = reid.dist(embs[0], embs[2])
-    print('dist | same {} | diff {}'.format(dist_same, dist_diff))
+    query = prepare_image('./test_dataset/query.jpg', INPUT_HEIGHT, INPUT_WIDTH)
+    same_img_fn = os.listdir('./test_dataset/same')
+    # print(same_img_fn)
+    same_imgs = [prepare_image(os.path.join('./test_dataset/same', x), INPUT_HEIGHT, INPUT_WIDTH) for x in same_img_fn if x.endswith('.jpg')]
+    diff_img_fn = os.listdir('./test_dataset/diff')
+    diff_imgs = [prepare_image(os.path.join('./test_dataset/diff', x), INPUT_HEIGHT, INPUT_WIDTH) for x in diff_img_fn if x.endswith('.jpg')]
+    start = time.time()
+    query_embs = reid.embed(query, 
+                            input_size=[INPUT_HEIGHT, INPUT_WIDTH], 
+                            augmentation=True, 
+                            pre_crop_size=[144, 288])
+    print('single embedding time {}'.format(time.time() - start))
+    same_embs = reid.embed(same_imgs, 
+                           input_size=(INPUT_HEIGHT, INPUT_WIDTH))
+    diff_embs = reid.embed(diff_imgs,
+                           input_size=(INPUT_HEIGHT, INPUT_WIDTH))
+    same_scores = []
+    diff_scores = []
+    for _embs in same_embs:
+        same_scores.append(reid.score(query_embs, _embs))
+    for _embs in diff_embs:
+        diff_scores.append(reid.score(query_embs, _embs))
+    print('dist \n same {} \n diff {}'.format(same_scores, diff_scores))
+    show_stats('same', same_scores)
+    show_stats('diff', diff_scores)
+    scores = []
+    for _s in same_scores:
+        scores.append([_s, 1])
+    for _s in diff_scores:
+        scores.append([_s, 0])
+    scores = np.stack(scores, axis=0)
+    print(scores.shape)
+    K = 10
+    topk_idx = np.argsort(scores[:, 0])[::-1][:K]
+    print('Top {} | {}'.format(K, scores[topk_idx]))
