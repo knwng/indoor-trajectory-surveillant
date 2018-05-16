@@ -8,6 +8,7 @@ from loss import cdist
 import os
 import cv2
 import time
+import random
 
 import h5py
 import json
@@ -39,8 +40,6 @@ def five_crops(image, crop_size):
     bottom_left  = image[crop_margin[0]:, :-crop_margin[1]]
     bottom_right = image[crop_margin[0]:, crop_margin[1]:]
     return center, top_left, top_right, bottom_left, bottom_right
-
-
 
 
 class ReIdentifier(object):
@@ -119,24 +118,44 @@ def show_stats(name, x):
     print('stats of {} | max {} | mean {} | min {}'.format(name, np.max(x), np.mean(x), np.min(x)))
     return
 
+def im_multiple_show(images, window_name):
+    if len(images) % 2 != 0:
+        images.append(np.zeros_like(images[0]))
+    print(len(images))
+    row1 = np.hstack(images[:int(len(images)/2)])
+    row2 = np.hstack(images[int(len(images)/2):])
+    image_stack = np.vstack((row1, row2))
+    cv2.imshow(window_name, image_stack)
+
 if __name__ == '__main__':
+    # TEST
     INPUT_HEIGHT = 256
     INPUT_WIDTH = 128
+    K = 10
+    THRESHOLD = 0.1
+    QUERY = 'query_1.jpg'
+    w_query = "query_images"
+    w_gallery = "gallery"
+    w_result = "TOP-{}_results".format(K)
+    cv2.namedWindow(w_query)
+    cv2.namedWindow(w_gallery)
+    cv2.namedWindow(w_result)
 
-    # TEST
     reid = ReIdentifier(model_name="resnet_v1_50", head_name="fc1024", model_ckpt="./market1501_weights/checkpoint-25000")
-    query = prepare_image('./test_dataset/query.jpg', INPUT_HEIGHT, INPUT_WIDTH)
+    query = prepare_image('./test_dataset/{}'.format(QUERY), INPUT_HEIGHT, INPUT_WIDTH)
     same_img_fn = os.listdir('./test_dataset/same')
-    # print(same_img_fn)
     same_imgs = [prepare_image(os.path.join('./test_dataset/same', x), INPUT_HEIGHT, INPUT_WIDTH) for x in same_img_fn if x.endswith('.jpg')]
     diff_img_fn = os.listdir('./test_dataset/diff')
     diff_imgs = [prepare_image(os.path.join('./test_dataset/diff', x), INPUT_HEIGHT, INPUT_WIDTH) for x in diff_img_fn if x.endswith('.jpg')]
+    gallery = [*same_imgs, *diff_imgs]
+    random.shuffle(gallery)
     start = time.time()
     query_embs = reid.embed(query, 
                             input_size=[INPUT_HEIGHT, INPUT_WIDTH], 
                             augmentation=True, 
                             pre_crop_size=[144, 288])
     print('single embedding time {}'.format(time.time() - start))
+    '''
     same_embs = reid.embed(same_imgs, 
                            input_size=(INPUT_HEIGHT, INPUT_WIDTH))
     diff_embs = reid.embed(diff_imgs,
@@ -147,16 +166,37 @@ if __name__ == '__main__':
         same_scores.append(reid.score(query_embs, _embs))
     for _embs in diff_embs:
         diff_scores.append(reid.score(query_embs, _embs))
-    print('dist \n same {} \n diff {}'.format(same_scores, diff_scores))
-    show_stats('same', same_scores)
-    show_stats('diff', diff_scores)
+    # print('dist \n same {} \n diff {}'.format(same_scores, diff_scores))
+    # show_stats('same', same_scores)
+    # show_stats('diff', diff_scores)
     scores = []
     for _s in same_scores:
         scores.append([_s, 1])
     for _s in diff_scores:
         scores.append([_s, 0])
     scores = np.stack(scores, axis=0)
-    print(scores.shape)
     K = 10
     topk_idx = np.argsort(scores[:, 0])[::-1][:K]
-    print('Top {} | {}'.format(K, scores[topk_idx]))
+    '''
+    start = time.time()
+    gallery_embs = reid.embed(gallery,
+                              input_size=(INPUT_HEIGHT, INPUT_WIDTH))
+    dur_time = time.time() - start
+    print('{} s embedding time for {} images ({} per image)'.format(dur_time, len(gallery), dur_time / len(gallery)))
+    scores = []
+    for _embs in gallery_embs:
+        scores.append(reid.score(query_embs, _embs))
+    # topk_idx = np.argsort(scores)[::-1][:K]
+    print('full list {}'.format(np.sort(scores)[::-1]))
+    sorted_idx = [pick_idx for pick_idx in np.argsort(scores)[::-1] if scores[pick_idx] > THRESHOLD]
+    topk_idx = sorted_idx[:min(len(sorted_idx), K)]
+    scores = np.array(scores)
+    print('Top {} | {}'.format(K, [scores[i] for i in topk_idx]))
+    cv2.imshow(w_query, query)
+    im_multiple_show(gallery, w_gallery)
+    slt_result = [gallery[i] for i in topk_idx]
+    if len(slt_result) <= 1:
+        slt_result = [np.zeros_like(query)]
+    im_multiple_show(slt_result, w_result)
+    cv2.waitKey()
+
