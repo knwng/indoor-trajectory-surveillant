@@ -1,4 +1,3 @@
-
 # coding: utf-8
 
 # In[1]:
@@ -37,7 +36,7 @@ sys.path.append('../')
 
 from nets import ssd_vgg_300, ssd_common, np_methods
 from preprocessing import ssd_vgg_preprocessing
-from notebooks import visualization
+#from notebooks import visualization
 
 
 # In[5]:
@@ -120,12 +119,39 @@ def process_image(img, select_threshold=0.5, nms_threshold=.45, net_shape=(300, 
 
 
 # Test on some demo image and visualize output.
-path = '../demo/'
-image_names = sorted(os.listdir(path))
+#path = './cam-img/0509E1_select/'
+path = './cam-img/demo/'  #input path
+cap = cv2.VideoCapture(os.path.join(path, 'a.mp4')) #src's defult name is 'a.mp4'
+fourcc = cv2.VideoWriter_fourcc(*'XVID')
+out = cv2.VideoWriter(os.path.join(path, 'output.mp4'), fourcc, 20.0, (960, 576))
+frame_idx = 1
+with open('bboxes.txt', 'w') as f: #store bboxes axis in txt file
+    while(cap.isOpened()):
+        ret,frame = cap.read()        
+        if frame_idx % 4 == 0: #define frame sample rate
+            if type(frame) == type(None): 
+                break
+            height, width, _ = frame.shape
+            rclasses, rscores, rbboxes =  process_image(frame)
+            rbboxes = [x for idx, x in enumerate(rbboxes) if rclasses[idx] == 15]
+            for bbox in rbboxes:
+                ymin = int(bbox[0] * height)
+                xmin = int(bbox[1] * width)
+                ymax = int(bbox[2] * height)
+                xmax = int(bbox[3] * width)
+                cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
+                out.write(frame)
+                f.write('{} | {} {} {} {}\n'.format(frame_idx, xmin, xmax, ymin, ymax))
+        frame_idx += 1
 
-img = mpimg.imread(path + image_names[-5])
-rclasses, rscores, rbboxes =  process_image(img)
-print('detect result class {} | score {} | bbox {}'.format(rclasses, rscores, rbboxes))
+out.release()
+cap.release()
+
+# image_names = sorted(os.listdir(path))
+
+# img = mpimg.imread(path + image_names[-1])
+# rclasses, rscores, rbboxes =  process_image(img)
+# print('detect result class {} | score {} | bbox {}'.format(rclasses, rscores, rbboxes))
 
 # visualization.bboxes_draw_on_img(img, rclasses, rscores, rbboxes, visualization.colors_plasma)
 # visualization.plt_bboxes(img, rclasses, rscores, rbboxes)
