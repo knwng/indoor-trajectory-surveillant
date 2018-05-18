@@ -44,19 +44,32 @@ def five_crops(image, crop_size):
 
 class ReIdentifier(object):
 
-    def __init__(self, model_name, head_name, model_ckpt, surveillant_map=None):
-        model = import_module('nets.' + model_name)
-        head = import_module('heads.' + head_name)
-
-        # self.image = tf.placeholder(dtype=tf.float32, shape=[None, INPUT_WIDTH, INPUT_HEIGHT, 3], name='image')
-        self.image = tf.placeholder(dtype=tf.float32, shape=[None, INPUT_HEIGHT, INPUT_WIDTH, 3], name='image')
-
-        self.endpoints, body_prefix = model.endpoints(self.image, is_training=False)
-        with tf.name_scope('head'):
-            self.endpoints = head.head(self.endpoints, 128, is_training=False)
-        self.sess = tf.Session()
-        tf.train.Saver().restore(self.sess, model_ckpt)
+    def __init__(self, model_name, head_name, model_ckpt, input_height, input_width, surveillant_map=None):
         self.surveillant_map = surveillant_map
+        self.input_height = input_height
+        self.input_width = input_width
+        self.graph = self.define_model(model_name, head_name)
+        self.model_ckpt = model_ckpt
+        self.sess = self.load_model()
+
+    def define_model(self, model_name, head_name):
+        subgraph = tf.Graph()
+        with subgraph.as_default():
+            model = import_module('reid_nets.' + model_name)
+            head = import_module('reid_heads.' + head_name)
+            # self.image = tf.placeholder(dtype=tf.float32, shape=[None, INPUT_WIDTH, INPUT_HEIGHT, 3], name='image')
+            self.image = tf.placeholder(dtype=tf.float32, shape=[None, self.input_height, self.input_width, 3], name='image')
+            
+            self.endpoints, body_prefix = model.endpoints(self.image, is_training=False)
+            with tf.name_scope('head'):
+                self.endpoints = head.head(self.endpoints, 128, is_training=False)
+            self.saver = tf.train.Saver()
+        return subgraph
+
+    def load_model(self):
+        sess = tf.Session(graph=self.graph)
+        self.saver.restore(sess, self.model_ckpt)
+        return sess
 
     def embed(self, image, input_size, augmentation=False, pre_crop_size=None):
         if augmentation and (pre_crop_size is None or input_size is None):
@@ -126,6 +139,7 @@ def im_multiple_show(images, window_name):
     row2 = np.hstack(images[int(len(images)/2):])
     image_stack = np.vstack((row1, row2))
     cv2.imshow(window_name, image_stack)
+
 
 if __name__ == '__main__':
     # TEST

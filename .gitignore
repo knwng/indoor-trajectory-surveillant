@@ -24,6 +24,7 @@ detector/datasets/*
 # weights
 reid/market1501_weights/
 detector/checkpoints/
+cv_models/
 
 # MAC specified
 .DS_Store

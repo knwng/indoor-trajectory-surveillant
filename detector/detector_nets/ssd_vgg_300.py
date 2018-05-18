@@ -55,8 +55,8 @@ import numpy as np
 import tensorflow as tf
 
 import tf_extended as tfe
-from nets import custom_layers
-from nets import ssd_common
+from detector_nets import custom_layers
+from detector_nets import ssd_common
 
 slim = tf.contrib.slim
 
