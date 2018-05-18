@@ -9,13 +9,19 @@ __pycache__/
 # dataset
 reid/Market-1501-v15.09.15/
 reid/Market-1501-v15.09.15/*
+reid/test_dataset
 *.jpg
+detector/datasets/*
 
 # vim cache
 *.sw[a-z]
 
+# mac specific
+.DS_Store
+
 # weights
 reid/market1501_weights/
+detector/checkpoints/
 
 # MAC specified
 .DS_Store
