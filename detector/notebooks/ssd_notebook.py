@@ -119,15 +119,21 @@ def process_image(img, select_threshold=0.5, nms_threshold=.45, net_shape=(300, 
 
 
 # Test on some demo image and visualize output.
-#path = './cam-img/0509E1_select/'
-path = './cam-img/demo/'  #input path
-cap = cv2.VideoCapture(os.path.join(path, 'a.mp4')) #src's defult name is 'a.mp4'
+path = '../videos/'  #input path
+output_path = '../outputs'
+if not os.path.exists(path):
+    os.mkdir(path)
+if not os.path.exists(output_path):
+    os.mkdir(output_path)
+
+video_name = 'hgh-test.avi'
+cap = cv2.VideoCapture(os.path.join(path, video_name))
 fourcc = cv2.VideoWriter_fourcc(*'XVID')
-out = cv2.VideoWriter(os.path.join(path, 'output.mp4'), fourcc, 20.0, (960, 576))
+out = cv2.VideoWriter(os.path.join(output_path, video_name), fourcc, 20.0, (960, 576))
 frame_idx = 1
 with open('bboxes.txt', 'w') as f: #store bboxes axis in txt file
     while(cap.isOpened()):
-        ret,frame = cap.read()        
+        ret, frame = cap.read()        
         if frame_idx % 4 == 0: #define frame sample rate
             if type(frame) == type(None): 
                 break
@@ -141,7 +147,8 @@ with open('bboxes.txt', 'w') as f: #store bboxes axis in txt file
                 xmax = int(bbox[3] * width)
                 cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
                 out.write(frame)
-                f.write('{} | {} {} {} {}\n'.format(frame_idx, xmin, xmax, ymin, ymax))
+            print('processing | frame {} | bbox {}'.format(frame_idx, rbboxes))
+                # f.write('{} | {} {} {} {}\n'.format(frame_idx, xmin, xmax, ymin, ymax))
         frame_idx += 1
 
 out.release()

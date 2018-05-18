@@ -9,6 +9,8 @@ __pycache__/
 # dataset
 reid/Market-1501-v15.09.15/
 reid/Market-1501-v15.09.15/*
+detector/videos/*
+detector/outputs/*
 reid/test_dataset
 *.jpg
 detector/datasets/*
