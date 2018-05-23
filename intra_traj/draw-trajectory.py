@@ -39,24 +39,18 @@ def detectedBBoxes(filename):
             h = ymax - y
 
             if idx == currIdx:
-                if True or x > 414 or y > 160:
-                    currLines.append((x,y,w,h))
-                else:
-                    pass
+                currLines.append((x,y,w,h))
             else:  # idx != currIdx
                 if currLines:
                     yield (currIdx, currLines)
                     currLines = []
 
-                if True or x > 414 or y > 160:
-                    skippedCount = (idx-currIdx-1) // fpd
-                    for i in range(skippedCount):
-                        yield(currIdx + (i+1)*fpd, [])
+                skippedCount = (idx-currIdx-1) // fpd
+                for i in range(skippedCount):
+                    yield(currIdx + (i+1)*fpd, [])
 
-                    currIdx = idx
-                    currLines = [(x,y,w,h)]
-                else:
-                    pass
+                currIdx = idx
+                currLines = [(x,y,w,h)]
 
         if currLines:
             yield (currIdx, currLines)
@@ -76,14 +70,6 @@ class MotionModel(object):
 
         self.counter = 15
 
-#    def predict(self, frame):
-#        """
-#        predict next state, should not change any internal state
-#        frame       : image
-#        return      : (x,y,w,h)
-#        """
-#        raise NotImplementedError
-
     def update(self, frame, bbox):
         """
         frame       : image
@@ -101,7 +87,7 @@ class MotionModel(object):
 
     def similarity(self, frame, bbox):
         """
-        between next state and bbox
+        between NEXT state and bbox
         return      : greater is more similar
         """
         raise NotImplementedError
