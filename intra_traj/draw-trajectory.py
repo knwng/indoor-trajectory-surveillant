@@ -17,7 +17,7 @@ from filterpy.kalman import KalmanFilter
 fpd = 4
 dt = 1/25 * fpd
 index = 0  # just a global varible used in logging
-startingFrame = 460
+#startingFrame = 460
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -378,7 +378,10 @@ def drawTrajectory(bboxesFilename, videoFilename):
 
 
 if __name__ == '__main__':
-    drawTrajectory("0509_1_2_PASS_bboxes.txt", "0509_1_2_PASS.mp4")
+    videoFilename = sys.argv[1]
+    bboxesFilename = sys.argv[2]
+    startingFrame = int(sys.argv[3])
+    drawTrajectory(bboxesFilename, videoFilename)
     #drawTrajectory("single_person_bboxes.txt", "single_person.avi")
     cv2.destroyAllWindows()
     #for (idx, bboxes) in detectedBBoxes("single_person_bboxes.txt"):
