@@ -1,12 +1,11 @@
-class DetectedInst(object):
+class FrameInst(object):
     '''
         Data structure for detected instance
     '''
-    def __init__(self, cropped_img, timestamp, boundingbox, identity):
-        self.cropped_img = cropped_img
+    def __init__(self, cropped_img_url, timestamp, bbox, identity=None, embedding=None):
+        self.cropped_img_url = cropped_img_url
         self.timestamp = timestamp
-        self.boundingbox = boundingbox
+        # [xmin, xmax, ymin, ymax]
+        self.bbox = bbox
         self.identity = identity
-        self.embedding = None
-        self.identity = None
-
+        self.embedding = embedding

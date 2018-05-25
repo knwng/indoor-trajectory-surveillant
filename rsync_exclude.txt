@@ -1,0 +1,13 @@
+- demo/
+- gallery_set/
+- gallery_set_full/
+- annotation/
+- query_set/
+- videos/
+
+- venv/
+- .git/
+
+- *.sw[a-z]
+
+- reid/test_dataset/
