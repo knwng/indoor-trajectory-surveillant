@@ -22,10 +22,12 @@ class MotionModel(object):
         frame       : image
         bbox        : (x,y,w,h)
         """
+        # ensure each class instance has a distinct id
         self.id = MotionModel.id
         self.id += 1
         MotionModel.id += 1
 
+        # lost countdown
         self.counter = 15
 
     def update(self, frame, bbox):
@@ -60,7 +62,7 @@ class MotionModel(object):
 
 class NaiveModel(MotionModel):
     """
-    just use currently detected bbox
+    use currently detected bbox, just for test
     """
     def __init__(self, frame, bbox):
         MotionModel.__init__(self, frame, bbox)
@@ -143,10 +145,4 @@ def similarityInArea((x1,y1,w1,h1), (x2,y2,w2,h2)):
 
     S12 = w12 * h12
     return S12 / S1
-
-def similarityInNorm((x1,y1), (x2,y2)):
-    """
-    Euclidean norm, [0, +infty], smaller is better
-    """
-    return np.linalg.norm([x1-x2, y1-y2])
 

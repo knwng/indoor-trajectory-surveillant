@@ -28,7 +28,7 @@ class Trajectories(object):
         """
         frame       : image
         bboxes      : [(x,y,w,h)]
-        model       : type, actually used MotionModel
+        model       : type, derived class of MotionModel
         """
         self.model = model
         self.objects = [self.model(frame,b) for b in bboxes]
@@ -55,13 +55,13 @@ class Trajectories(object):
         frame       : image
         bboxes      : [(x,y,w,h)]
         """
-        if not bboxes:
+        if not bboxes:  # no bounding box found
             for i in range(len(self.objects)):
                 # reverse order, cause some elements may be popped
                 i = len(self.objects)-i-1
                 self.autoremove(i, count=1)
 
-        elif not self.objects:
+        elif not self.objects:  # no model, init from bounding boxes
             self.objects = [self.model(frame,b) for b in bboxes]
             logger().info("{} new objects added".format(len(self.objects)))
 
@@ -110,26 +110,22 @@ class Trajectories(object):
 
     def extractAll(self):
         """
-        extract trajectories
+        extract trajectories of all motion models
         return      : [ (id, [(x,y)]) ]
         """
         return [(o.id, o.extract()) for o in self.objects]
 
 
-def trajshow(image, index, trajs):
+def trajshow(image, trajs):
     """
     trajs       : [ (id, [(x,y)]) ]
     """
     #print("{} objects".format(len(objectsTraj)))
     for (_,traj) in trajs:  # traj: [(x,y)]
         pairs = zip(traj, traj[1:])  # pairs: [((x1,y1),(x2,y2))]
-        #logger().debug("{} points".format(len(traj)))
-        #logger().debug("{} lines".format(len(pairs)))
         for ((x1,y1), (x2,y2)) in pairs:
             (x1,x2,y1,y2) = map(int, (x1,x2,y1,y2))  # float -> int
             cv2.line(image, (x1,y1), (x2,y2), (255,0,0), 5)
-
-    cv2.putText(image, str(index), (100,20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (50,170,50), 2)
 
 
 def bboxesshow(image, bboxes):
@@ -143,19 +139,22 @@ def drawTrajectory(bboxesFilename, videoFilename):
 
     global index
 
+    # index     : int
+    # frame     : image
+    # bboxes    : [ (x,y,w,h) ]
     for (index, frame, bboxes) in data:
-        # initialize
-        if not trajs:
+        if not trajs:  # init motion models
             trajs = Trajectories(frame, bboxes, EMAVelocityModel)
         else:
             trajs.updateAll(frame, bboxes)
 
-        trajshow(frame, index, trajs.extractAll())
+        trajshow(frame, trajs.extractAll())
         bboxesshow(frame, bboxes)
+        # show index on top-left corner
+        cv2.putText(frame, str(index), (50,20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (50,170,50), 2)
 
         cv2.imshow("test", frame)
         cv2.waitKey(int(dt*800))
-
 
 
 if __name__ == '__main__':

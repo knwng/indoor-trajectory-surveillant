@@ -10,6 +10,10 @@ def logger():
 fpd = 4
 
 def bboxesGenerator(filename):
+    """
+    parse *_bboxes.txt
+    return      : generator( (x,y,w,h) )
+    """
     with open(filename,'r') as f:
         currLines = []
         currIdx   = None
@@ -42,6 +46,10 @@ def bboxesGenerator(filename):
 
 
 def framesGenerator(filename):
+    """
+    read video frame by frame
+    return      : generator( image )
+    """
     capture = cv2.VideoCapture(filename)
     if not capture.isOpened():
         raise ValueError("file {} does not exist".format(filename))
@@ -58,6 +66,9 @@ def framesGenerator(filename):
 
 
 def dataGenerator(video, bboxes):
+    """
+    return      : generator( (index, image, [(x,y,w,h)]) )
+    """
     frames = framesGenerator(video)
     bboxes = bboxesGenerator(bboxes)
     
