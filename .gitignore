@@ -1,3 +1,6 @@
+# virtualenv
+/intra_traj/ve/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
