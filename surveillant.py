@@ -7,6 +7,7 @@ import cv2
 import json
 import time
 import pickle
+import random
 
 sys.path.insert(0, './reid')
 from reid import ReIdentifier
@@ -19,7 +20,7 @@ model_root = './cv_models'
 class Surveillant(object):
     
     def __init__(self, detector_ckpt, reid_ckpt, detect_interval=8, 
-                 detect_input_shape=512, top_k=5, reid_threshold=0.8,
+                 detect_input_shape=512, top_k=5, reid_threshold=0.08,
                  reid_model_name="resnet_v1_50", reid_head_name="fc1024",
                  struct_storage_root='./output/struct_storage', raw_storage_root='./output/raw'):
         self.detector = Detector(ckpt=os.path.join(os.getcwd(), detector_ckpt),
@@ -30,9 +31,12 @@ class Surveillant(object):
                                  model_ckpt=os.path.join(os.getcwd(), reid_ckpt),
                                  input_size=[256, 128],
                                  surveillant_map=None)
+        self.reid_threshold = reid_threshold
         self.top_k = top_k
         self.struct_storage_root = struct_storage_root
         self.raw_storage_root = raw_storage_root
+        self.id_dict = {}
+        self.id_idx = int(0)
         if not os.path.exists(self.struct_storage_root):
             os.makedirs(self.struct_storage_root)
         if not os.path.exists(self.raw_storage_root):
@@ -41,7 +45,39 @@ class Surveillant(object):
         #     os.makedirs(os.path.join(RAW_STORAGE_ROOT, STORAGE_BASENAME))
 
     def single_detect(self, img, timestamp):
-        pass
+        rclasses, rscores, rbboxes = self.detector.detect(img, viz=False)
+        if len(rbboxes) == 0:
+            return [None]*5
+        cropped_imgs = [cv2.resize(img[bbox[2]:bbox[3], bbox[0]:bbox[1], :], (128, 256)) for bbox in rbboxes]
+        embs = self.reid.embed(cropped_imgs, augmentation=True, pre_crop_size=[144, 288])
+        ids = []
+        id_candidates = []
+        if len(self.id_dict.keys()) == 0:
+            for _emb in embs:
+                self.id_dict[self.id_idx] = [_emb]
+                ids.append(self.id_idx)
+                id_candidates.append([self.id_idx, 1.0])
+                self.id_idx += 1
+        else:
+            for _emb in embs:
+                scores = []
+                for key, value in self.id_dict.items():
+                    for gal_emb in value:
+                        scores.append([key, self.reid.score(_emb, gal_emb)])
+                scores = np.array(scores)
+                sorted_idx = [pick_idx for pick_idx in np.argsort(scores[:, 1])[::-1] if scores[pick_idx, 1] > self.reid_threshold]
+                topk_idx = sorted_idx[:min(len(sorted_idx), self.top_k)]
+                if len(topk_idx) == 0:
+                    self.id_dict[self.id_idx] = [_emb]
+                    ids.append(self.id_idx)
+                    self.id_idx += 1
+                else:
+                    # print('top1 {}'.format(topk_idx[0]))
+                    # print('current dict {}'.format(self.id_dict))
+                    self.id_dict[scores[topk_idx[0], 0]].append(_emb)
+                    ids.append(scores[topk_idx[0], 0])
+                id_candidates.append(scores[topk_idx])
+        return rbboxes, embs, ids, id_candidates, cropped_imgs
 
     def query(self, img, viz=False):
         emb = self.reid.embed(img, augmentation=True, pre_crop_size=[144, 288])
@@ -63,11 +99,14 @@ class Surveillant(object):
         self.gallery = self.gallery + list(zip(img_fn_list, embs))
         return
     
-    def video_structuralization(self, video_dir):
+    def video_structuralization(self, video_dir, viz=False):
         surve = Surveillant(detector_ckpt='cv_models/VGG_VOC0712_SSD_512x512_ft_iter_120000.ckpt',
                         reid_ckpt='cv_models/checkpoint-25000')
         STORAGE_BASENAME = os.path.basename(video_dir).split('.')[0]
         cap = cv2.VideoCapture(video_dir)
+        if viz:
+            fourcc = cv2.VideoWriter_fourcc(*'XVID')
+            output = cv2.VideoWriter(os.path.join(self.struct_storage_root, STORAGE_BASENAME+'_viz.mp4'), fourcc, 20.0, (960, 576))
         frame_idx = 0
         struct_info_storage = {'video_fn':video_dir, 
                                'frames':[], 
@@ -77,28 +116,42 @@ class Surveillant(object):
         while cap.isOpened():
             frame_idx += 1
             if frame_idx % self.detect_interval != 0:
+                if viz:
+                    ret, frame = cap.read()
+                    if frame is not None:
+                        output.write(frame)
                 continue
             ret, frame = cap.read()
             if frame is None:
                 print('No frame stream')
                 break
-            height, width, _ = frame.shape
-            rclasses, rscores, rbboxes = self.detector.detect(frame, viz=False)
-            if len(rbboxes) == 0:
+            # height, width, _ = frame.shape
+            # rclasses, rscores, rbboxes = self.detector.detect(frame, viz=False)
+            rbboxes, embs, ids, id_candidates, cropped_imgs = self.single_detect(frame, frame_idx)
+            if rbboxes is None:
+                if viz:
+                    output.write(frame)
                 continue
+
+            # if len(rbboxes) == 0:
+            #     continue
             identity_idx = 1
-            cropped_imgs = [cv2.resize(frame[bbox[2]:bbox[3], bbox[0]:bbox[1], :], (128, 256)) for bbox in rbboxes]
-            embs = self.reid.embed(cropped_imgs)
+            # cropped_imgs = [cv2.resize(frame[bbox[2]:bbox[3], bbox[0]:bbox[1], :], (128, 256)) for bbox in rbboxes]
+            # embs = self.reid.embed(cropped_imgs)
             raw_det_storage['frame-{}'.format(frame_idx)] = cropped_imgs
     
-            for _bbox, _emb in zip(rbboxes, embs):
-                # cropped_img_url = os.path.join(RAW_STORAGE_ROOT, STORAGE_BASENAME, 'frame-{}-idx-{}.jpg'.format(frame_idx, identity_idx))
+            for _bbox, _emb, _id, _idc in zip(rbboxes, embs, ids, id_candidates):
                 cropped_img_url=''
                 struct_info_storage['frames'].append(FrameInst(cropped_img_url=cropped_img_url,
                                                            timestamp=frame_idx,
                                                            bbox=_bbox,
+                                                           identity=_id,
+                                                           id_candidates=_idc,
                                                            embedding=_emb))
-                
+                if viz:
+                    cv2.rectangle(frame, (_bbox[0], _bbox[2]), (_bbox[1], _bbox[3]), (0, 255, 0), 2)
+                    cv2.putText(frame, 'ID: {}'.format(int(_id)), (_bbox[0], _bbox[2]), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 2, cv2.LINE_AA)
+                    output.write(frame)
                 identity_idx += 1
             print('preparing | frame {} | id {}'.format(frame_idx, identity_idx-1))
         with open(os.path.join(self.struct_storage_root, STORAGE_BASENAME)+'.pkl', 'wb') as f:
@@ -129,6 +182,7 @@ def TEST_JOINT_DET_REID():
     struct_info_storage = {'video_fn':video_dir, 
                            'frames':[], 
                            'timestamp_offset':0.0,
+                           'detect_interval':self.detect_interval,
                            'storage_dir':os.path.join(RAW_STORAGE_ROOT, STORAGE_BASENAME)}
     raw_det_storage = {}
     while cap.isOpened():
@@ -227,7 +281,7 @@ def TEST_DET():
 if __name__ == '__main__':
     # TEST_JOINT_DET_REID()
     surve = Surveillant(detector_ckpt='cv_models/VGG_VOC0712_SSD_512x512_ft_iter_120000.ckpt',
-                        reid_ckpt='cv_models/checkpoint-25000')
+                        reid_ckpt='cv_models/checkpoint-25000', detect_interval=1, reid_threshold=0.07)
     video_dir = './videos/0509_1_A3_ELEVATOR_slice.mp4'
-    surve.video_structuralization(video_dir)
+    surve.video_structuralization(video_dir, viz=True)
 
