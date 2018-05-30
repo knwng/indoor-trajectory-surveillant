@@ -6,6 +6,8 @@ import logging
 
 from filterpy.kalman import KalmanFilter
 
+from config import *
+
 # frames per detection
 fpd = 4
 dt = 1/25 * fpd

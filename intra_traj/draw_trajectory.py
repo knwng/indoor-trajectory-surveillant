@@ -1,5 +1,6 @@
 #!/usr/bin/env python2
 
+
 from __future__ import division
 from __future__ import print_function
 
@@ -12,9 +13,9 @@ import itertools
 from motion_models import MotionModel, EMAVelocityModel
 from data_generator import dataGenerator
 
+from config import *
+
 # frames per detection
-fpd = 4
-dt = 1/25 * fpd
 index = 0  # just a global varible used in logging
 
 

@@ -4,10 +4,10 @@ import cv2
 import re
 import logging
 
+from config import *
+
 def logger():
     return logging.getLogger(__name__)
-
-fpd = 4
 
 def bboxesGenerator(filename):
     """
