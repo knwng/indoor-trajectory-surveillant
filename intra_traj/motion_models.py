@@ -3,6 +3,8 @@
 from __future__ import division
 import numpy as np
 import logging
+import cv2
+from math import log
 
 from filterpy.kalman import KalmanFilter
 
@@ -40,7 +42,7 @@ class MotionModel(object):
         """
         raise NotImplementedError
 
-    def notfound(self, count):
+    def notfound(self, count, frames):
         """
         count       : how many times it has been un-detectable
         return      : (x,y,w,h) if still_in_screen else None
@@ -74,7 +76,7 @@ class NaiveModel(MotionModel):
         self.hist.append(bbox)
         return updated
 
-    def notfound(self, count):
+    def notfound(self, count, frames=None):
         for i in range(count):
             self.counter -= 1
         return self.hist[-1] if self.counter>0 else None
@@ -110,7 +112,7 @@ class EMAVelocityModel(MotionModel):
         self.velocity = (f(dx,dx_), f(dy,dy_), f(dw,dw_), f(dh,dh_))
         return updated
 
-    def notfound(self, count):
+    def notfound(self, count, frames=None):
         for i in range(count):
             ( x, y, w, h) = self.hist[-1]
             (dx,dy,dw,dh) = self.velocity
@@ -121,9 +123,112 @@ class EMAVelocityModel(MotionModel):
 
     def similarity(self, frame, bbox):
         return similarityInArea(self.hist[-1], bbox)
+        #return crossEntropy(self.hist[-1], bbox)
 
     def extract(self):
         return [(x+w/2, y+h) for (x,y,w,h) in self.hist]
+
+
+class KalmanFilterModel(MotionModel):
+    """
+    Kalman filter based
+    state: x, y, dx, dy
+    """
+    # transition matrix
+    F = np.array([ [ 1., 0., dt, 0. ]
+                 , [ 0., 1., 0., dt ]
+                 , [ 0., 0., 1., 0. ]
+                 , [ 0., 0., 0., 1. ]
+                 ])
+    # measurement matrix
+    H = np.eye(2, 4)
+    # noise at transition
+    Q = np.diag([10., 10., 10., 10.])
+    # noise at measurement
+    R = np.diag([1., 1.])
+    # initial covariance
+    P = np.diag([1., 1., 20., 20.])
+
+    def __init__(self, frame, (x,y,w,h)):
+        MotionModel.__init__(self, frame, (x,y,w,h))
+        self.filter = cv2.KalmanFilter(4, 2)
+        self.filter.transitionMatrix     = F
+        self.filter.measurementMatrix    = H
+        self.filter.processNoiseCov      = Q
+        self.filter.measurementNoiseCov  = R
+        self.filter.errorCovPost         = P
+        self.filter.statePost = np.array([[x], [y], [0.], [0.]])
+        self.hist = [self.filter.statePost]
+
+    def update(self, frame, (x,y,w,h)):
+        self.filter.predict()
+        self.filter.correct(np.array([[x], [y], [0.], [0.]]))
+        self.hist.append(self.filter.statePost)
+        return self.hist[-1]
+
+    def notfound(self, count, frames=None):
+        for i in range(count):
+            self.predict()
+            self.hist.append(self.filter.statePost)
+            self.count -= 1
+        return self.hist[-1] if self.count>0 else None
+
+    def similarity(self, frame, (x,y,w,h)):
+        pass
+
+    def extract(self):
+        pass
+
+
+class TrackingModel(MotionModel):
+    """
+    model using OpenCV tracking API
+    """
+    create = cv2.TrackerKCF_create
+
+    def __init__(self, frame, bbox):
+        MotionModel.__init__(self, frame, bbox)
+        self.tracker = TrackingModel.create()
+        self.tracker.init(frame, bbox)
+        self.hist = [bbox]
+
+    def update(self, frame, bbox):
+        self.tracker.init(frame, bbox)
+        self.hist.append(bbox)
+        return bbox
+
+    def notfound(self, count, frames=None):
+        for i in range(count):
+            frame = frames[i]
+            (ok, bbox) = self.tracker.update(frame)
+            self.hist.append(bbox)
+            self.counter -= 1
+        return self.hist[-1] if self.counter>0 else None
+
+    def similarity(self, frame, bbox):
+        #return similarityInArea(self.hist[-1], bbox)
+        return crossEntropy(self.hist[-1], bbox)
+
+    def extract(self):
+        return [(x+w/2, y+h) for (x,y,w,h) in self.hist]
+
+
+def crossEntropy((x1,y1,w1,h1), (x2,y2,w2,h2)):
+    """
+    1: estimated, 2: actual
+    """
+    p = 1 / w2 / h2
+    q = 1 / w1 / h1
+    result = 0
+    for i in range(w2):
+        for j in range(h2):
+            point = (x2+i, y2+j)
+            if x1 <= point[0] <= x1+w1 and y1 <= point[1] <= y1+h1:
+                result -= p * log(q)
+            else:
+                pass
+    logger().debug("crossEntropy: {}".format(result))
+    return result
 
 
 def similarityInArea((x1,y1,w1,h1), (x2,y2,w2,h2)):
@@ -131,6 +236,8 @@ def similarityInArea((x1,y1,w1,h1), (x2,y2,w2,h2)):
     return S_{overlapped} / S_{bbox1}, [0, 1], greater is better
     """
     S1 = w1 * h1
+    if S1 == 0:
+        return int(x1 < x2 < x1+w1 and y1 < y2 < y1+h1)
 
     def clamp(x, minVal, maxVal):
         return sorted((x, minVal, maxVal))[1]

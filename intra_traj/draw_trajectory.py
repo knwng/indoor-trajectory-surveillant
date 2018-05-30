@@ -10,7 +10,7 @@ import numpy as np
 import logging
 import itertools
 
-from motion_models import MotionModel, EMAVelocityModel
+from motion_models import MotionModel, EMAVelocityModel, TrackingModel
 from data_generator import dataGenerator
 
 from config import *
@@ -35,13 +35,13 @@ class Trajectories(object):
         self.objects = [self.model(frame,b) for b in bboxes]
         logger().info("{} new objects added".format(len(self.objects)))
 
-    def autoremove(self, index, count):
+    def autoremove(self, index, count, frames):
         """
         self.objects[`index`] has been un-detected for `count` frames
         remove it if gets lost
         return      : whether it is removed
         """
-        position = self.objects[index].notfound(count)
+        position = self.objects[index].notfound(count, frames)
         if not position:
             logger().info("objects {} lost, removed".format(self.objects[index].id))
             self.objects.pop(index)
@@ -60,7 +60,7 @@ class Trajectories(object):
             for i in range(len(self.objects)):
                 # reverse order, cause some elements may be popped
                 i = len(self.objects)-i-1
-                self.autoremove(i, count=1)
+                self.autoremove(i, count=1, frames=[frame])
 
         elif not self.objects:  # no model, init from bounding boxes
             self.objects = [self.model(frame,b) for b in bboxes]
@@ -105,9 +105,9 @@ class Trajectories(object):
                 elif i!=selectedModel[j]:
                     logger().debug("object {} choose bbox {}, which choose i={}"
                             .format(self.objects[i].id, bboxes[j], selectedModel[j]))
-                    self.autoremove(i, count=1)
+                    self.autoremove(i, count=1, frames=[frame])
                 else:  # j == -1
-                    self.autoremove(i, count=1)
+                    self.autoremove(i, count=1, frames=[frame])
 
     def extractAll(self):
         """
@@ -131,6 +131,7 @@ def trajshow(image, trajs):
 
 def bboxesshow(image, bboxes):
     for (x,y,w,h) in bboxes:
+        (x,y,w,h) = map(int, (x,y,w,h))
         cv2.rectangle(image, (x,y), (x+w,y+h), (0,255,0))
 
 
