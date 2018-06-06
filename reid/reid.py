@@ -44,13 +44,15 @@ def five_crops(image, crop_size):
 
 class ReIdentifier(object):
 
-    def __init__(self, model_name, head_name, model_ckpt, input_height, input_width, surveillant_map=None):
+    def __init__(self, model_name, head_name, model_ckpt, input_size=(256, 128), surveillant_map=None):
         self.surveillant_map = surveillant_map
-        self.input_height = input_height
-        self.input_width = input_width
+        # self.input_height = input_height
+        # self.input_width = input_width
+        self.input_size = list(input_size)
         self.graph = self.define_model(model_name, head_name)
         self.model_ckpt = model_ckpt
         self.sess = self.load_model()
+        self.gallery = []
 
     def define_model(self, model_name, head_name):
         subgraph = tf.Graph()
@@ -58,7 +60,7 @@ class ReIdentifier(object):
             model = import_module('reid_nets.' + model_name)
             head = import_module('reid_heads.' + head_name)
             # self.image = tf.placeholder(dtype=tf.float32, shape=[None, INPUT_WIDTH, INPUT_HEIGHT, 3], name='image')
-            self.image = tf.placeholder(dtype=tf.float32, shape=[None, self.input_height, self.input_width, 3], name='image')
+            self.image = tf.placeholder(dtype=tf.float32, shape=[None, *self.input_size, 3], name='image')
             
             self.endpoints, body_prefix = model.endpoints(self.image, is_training=False)
             with tf.name_scope('head'):
@@ -71,8 +73,8 @@ class ReIdentifier(object):
         self.saver.restore(sess, self.model_ckpt)
         return sess
 
-    def embed(self, image, input_size, augmentation=False, pre_crop_size=None):
-        if augmentation and (pre_crop_size is None or input_size is None):
+    def embed(self, image, augmentation=False, pre_crop_size=None):
+        if augmentation and pre_crop_size is None :
             print('Specify pre_crop_size and input_size for test time augmentation')
             raise ValueError
         if np.array(image).ndim == 3:
@@ -82,11 +84,11 @@ class ReIdentifier(object):
             for img in image:
                 # output: [288, 144, 3]
                 img = cv2.resize(img, tuple(pre_crop_size))
-                aug_img = self.testtime_augmentation(img, input_size)
+                aug_img = self.testtime_augmentation(img, self.input_size)
                 _emb = self.sess.run(self.endpoints['emb'], feed_dict={self.image:aug_img})
                 emb.append(np.mean(_emb, axis=0))
         else:
-            image = [cv2.resize(img, tuple(input_size[::-1])) for img in image]
+            image = [cv2.resize(img, tuple(self.input_size[::-1])) for img in image]
             emb = self.sess.run(self.endpoints['emb'], feed_dict={self.image:image})
         return emb
 

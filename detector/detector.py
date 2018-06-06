@@ -8,7 +8,7 @@ import copy
 import random
 import numpy as np
 import tensorflow as tf
-from detector_nets import ssd_vgg_300, ssd_common, np_methods
+from detector_nets import ssd_vgg_300, ssd_vgg_512, ssd_common, np_methods
 from preprocessing import ssd_vgg_preprocessing
 
 slim = tf.contrib.slim
@@ -16,9 +16,10 @@ slim = tf.contrib.slim
 class Detector(object):
 
     def __init__(self, ckpt='./checkpoints/ssd_300_vgg.ckpt', \
+                       net_shape=(512,512), \
                        select_threshold=0.5, nms_threshold=0.45, \
                        num_classes=21, top_k=400):
-        self.net_shape = (300, 300)
+        self.net_shape = net_shape
         self.data_format = 'NHWC'
         self.ckpt = ckpt
         self.select_threshold = select_threshold
@@ -42,7 +43,7 @@ class Detector(object):
                                                             resize=ssd_vgg_preprocessing.Resize.WARP_RESIZE)
             self.image_4d = tf.expand_dims(self.image_pre, 0)
             reuse = True if 'ssd_net' in locals() else None
-            self.ssd_net = ssd_vgg_300.SSDNet()
+            self.ssd_net = ssd_vgg_512.SSDNet()
             with slim.arg_scope(self.ssd_net.arg_scope(data_format=self.data_format)):
                 self.predictions, self.localisations, _, _ = self.ssd_net.net(self.image_4d, is_training=False, reuse=reuse)
             self.ssd_anchors = self.ssd_net.anchors(self.net_shape)
@@ -69,7 +70,8 @@ class Detector(object):
         rclasses, rscores, rbboxes = np_methods.bboxes_sort(rclasses, rscores, rbboxes, top_k=self.top_k)
         rclasses, rscores, rbboxes = np_methods.bboxes_nms(rclasses, rscores, rbboxes, nms_threshold=self.nms_threshold)
         rbboxes = np_methods.bboxes_resize(rbbox_img, rbboxes)
-        rbboxes = [np.array([x[1]*img_w, x[3]*img_w, x[0]*img_h, x[2]*img_h]).astype(np.int) for idx, x in enumerate(rbboxes) if rclasses[idx] == 15]
+        # print('detected bbox {}'.format(list(zip(rbboxes, rclasses))))
+        rbboxes = [np.array([x[1]*img_w, x[3]*img_w, x[0]*img_h, x[2]*img_h]).astype(np.int) for idx, x in enumerate(rbboxes) if int(rclasses[idx]) == 15]
 
         if viz:
             img_show = copy.deepcopy(img)
@@ -97,10 +99,11 @@ def video_test():
         while(cap.isOpened()):
             ret, frame = cap.read()        
             if frame_idx % 4 == 0: #define frame sample rate
-                if type(frame) == type(None): 
+                if frame is None:
+                    print('No frame stream')
                     break
                 height, width, _ = frame.shape
-                rclasses, rscores, rbboxes =  process_image(frame)
+                rclasses, rscores, rbboxes = process_image(frame)
                 rbboxes = [x for idx, x in enumerate(rbboxes) if rclasses[idx] == 15]
                 for bbox in rbboxes:
                     ymin = int(bbox[0] * height)

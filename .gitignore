@@ -17,6 +17,10 @@ detector/outputs/*
 reid/test_dataset
 *.jpg
 detector/datasets/*
+demo/
+videos/
+annotation/
+output/
 
 # vim cache
 *.sw[a-z]
