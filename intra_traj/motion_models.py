@@ -1,12 +1,11 @@
 #!/usr/bin/env python2
 
 from __future__ import division
+
 import numpy as np
 import logging
 import cv2
-from math import log
-
-from filterpy.kalman import KalmanFilter
+from math import *
 
 from config import *
 
@@ -20,6 +19,7 @@ def logger():
 
 class MotionModel(object):
     id = 0
+    counter = 15
 
     def __init__(self, frame, bbox):
         """
@@ -32,7 +32,8 @@ class MotionModel(object):
         MotionModel.id += 1
 
         # lost countdown
-        self.counter = 15
+        self.counter = MotionModel.counter
+        self.counter -= 1
 
     def update(self, frame, bbox):
         """
@@ -42,7 +43,7 @@ class MotionModel(object):
         """
         raise NotImplementedError
 
-    def notfound(self, count, frames):
+    def notfound(self, frame):
         """
         count       : how many times it has been un-detectable
         return      : (x,y,w,h) if still_in_screen else None
@@ -64,29 +65,78 @@ class MotionModel(object):
         raise NotImplementedError
 
 
-class NaiveModel(MotionModel):
+class KalmanFilterModel(MotionModel):
     """
-    use currently detected bbox, just for test
+    Kalman filter based
+    state: x, y, dx, dy
     """
-    def __init__(self, frame, bbox):
-        MotionModel.__init__(self, frame, bbox)
-        self.hist = [bbox]
+    # transition matrix
+    F = np.array([ [ 1., 0., 1., 0. ]
+                 , [ 0., 1., 0., 1. ]
+                 , [ 0., 0., 1., 0. ]
+                 , [ 0., 0., 0., 1. ]
+                 ])
+    # measurement matrix
+    H = np.eye(2, 4)
+    # noise at transition
+    Q = np.diag([1e0, 1e0, 1e1, 1e1])
+    #Q = 1e-5 * np.eye(4)
+    # noise at measurement
+    R = np.diag([5.0, 5.0])
+    #R = 0.1 * np.eye(2)
+    # initial covariance
+    P = np.diag([2.1, 2.1, 4., 4.])
+    #P = 0.1 * np.eye(4)
 
-    def update(self, frame, bbox):
-        self.hist.append(bbox)
-        return updated
+    def __init__(self, frame, (x,y,w,h)):
+        MotionModel.__init__(self, frame, (x,y,w,h))
 
-    def notfound(self, count, frames=None):
-        for i in range(count):
-            self.counter -= 1
+        self.filter = cv2.KalmanFilter(4, 2)
+        self.filter.transitionMatrix     = KalmanFilterModel.F
+        self.filter.measurementMatrix    = KalmanFilterModel.H
+        self.filter.processNoiseCov      = KalmanFilterModel.Q.copy()
+        self.filter.measurementNoiseCov  = KalmanFilterModel.R.copy()
+        self.filter.errorCovPost         = KalmanFilterModel.P.copy()
+        self.filter.statePost = np.array([[x+w/2], [y+h], [0.], [0.]])
+
+        self.hist = [self.filter.statePost.copy()]
+
+    def predict(self):
+        logger().debug("id {}: |P|={}".format(self.id, np.linalg.det(self.filter.errorCovPost)))
+        return self.filter.predict()
+
+    def update(self, frame, (x,y,w,h)):
+        self.counter = MotionModel.counter
+        self.counter -= 1
+        #self.filter.predict()
+        self.filter.correct(np.array([[x+w/2], [y+h]], dtype=np.float))
+        self.hist.append(self.filter.statePost.copy())
+        return self.hist[-1]
+
+    def notfound(self, frame=None):
+        self.hist.append(self.filter.statePost.copy())
+        self.counter -= 1
         return self.hist[-1] if self.counter>0 else None
 
-    def similarity(self, frame, bbox):
-        return similarityInArea(self.hist[-1], bbox)
+    def _similarity(self, frame, (x,y,w,h)):
+        mu = self.filter.statePost[0:2]
+        X = np.array([[x+w/2], [y+h]], dtype=np.float)
+        Sigma = self.filter.errorCovPost[0:2,0:2]
+        probability = 1/sqrt(pow(2*pi, 4) * np.linalg.det(Sigma)) * exp(-1/2 * np.linalg.multi_dot([np.transpose(X-mu), np.linalg.inv(Sigma), X-mu]))
+        logger().debug("id {}: \n|Sigma|=\n{}, \nxhat | x=\n{}, \np={}".format(self.id, Sigma, np.hstack([mu, X]), probability))
+        return probability
+
+    def similarity(self, frame, (x,y,w,h)):
+        [[_x], [_y], [_dx], [_dy]] = self.filter.statePre
+        mu = self.filter.statePost
+        centerized = np.array([ [x+w/2-_x], [y+h-_y], [x+w/2-_x-_dx], [y+h-_y-_dy] ], dtype=np.float)
+        Sigma = self.filter.errorCovPost
+        probability = 1/sqrt(pow(2*pi, 4) * np.linalg.det(Sigma)) * exp(-1/2 * np.linalg.multi_dot([np.transpose(centerized), np.linalg.inv(Sigma), centerized]))
+        logger().debug("id {}: \n|P|=\n{}, \nxhat | x=\n{}, \np={}".format(self.id, Sigma, np.hstack([mu, mu+centerized]), probability))
+        return probability
 
     def extract(self):
-        return [(x+w/2, y+h) for (x,y,w,h) in self.hist]
-
+        return [(x,y,dx,dy) for [[x],[y],[dx],[dy]] in self.hist]
 
 class EMAVelocityModel(MotionModel):
     """
@@ -95,12 +145,17 @@ class EMAVelocityModel(MotionModel):
     alpha = 0.8
     decay = 0.9
 
-    def __init__(self, frame, bbox):
-        MotionModel.__init__(self, frame, bbox)
-        self.hist = [bbox]
+    def __init__(self, frame, (x,y,w,h)):
+        MotionModel.__init__(self, frame, (x,y,w,h))
+        self.hist = [(x+w/2, y+h, w, h)]
         self.velocity = (0,0,0,0)
 
+    def predict(self):
+        pass
+
     def update(self, frame, (x,y,w,h)):
+        (x,y) = (x+w/2, y+h)
+
         f = lambda new, old: self.alpha*new + (1-self.alpha)*old
 
         (x_,y_,w_,h_) = self.hist[-1]
@@ -112,146 +167,26 @@ class EMAVelocityModel(MotionModel):
         self.velocity = (f(dx,dx_), f(dy,dy_), f(dw,dw_), f(dh,dh_))
         return updated
 
-    def notfound(self, count, frames=None):
-        for i in range(count):
-            ( x, y, w, h) = self.hist[-1]
-            (dx,dy,dw,dh) = self.velocity
-            self.hist.append(((x+dx),(y+dy),(w+dw),(h+dh)))
-            self.velocity = tuple(map(lambda x: x*self.decay, self.velocity))
-            self.counter -= 1
+    def notfound(self, frame=None):
+        ( x, y, w, h) = self.hist[-1]
+        (dx,dy,dw,dh) = self.velocity
+        self.hist.append(((x+dx),(y+dy),(w+dw),(h+dh)))
+        self.velocity = tuple(map(lambda x: x*self.decay, self.velocity))
+        self.counter -= 1
         return self.hist[-1] if self.counter>0 else None
-
-    def similarity(self, frame, bbox):
-        return similarityInArea(self.hist[-1], bbox)
-        #return crossEntropy(self.hist[-1], bbox)
-
-    def extract(self):
-        return [(x+w/2, y+h) for (x,y,w,h) in self.hist]
-
-
-class KalmanFilterModel(MotionModel):
-    """
-    Kalman filter based
-    state: x, y, dx, dy
-    """
-    # transition matrix
-    F = np.array([ [ 1., 0., dt, 0. ]
-                 , [ 0., 1., 0., dt ]
-                 , [ 0., 0., 1., 0. ]
-                 , [ 0., 0., 0., 1. ]
-                 ])
-    # measurement matrix
-    H = np.eye(2, 4)
-    # noise at transition
-    Q = np.diag([10., 10., 10., 10.])
-    # noise at measurement
-    R = np.diag([1., 1.])
-    # initial covariance
-    P = np.diag([1., 1., 20., 20.])
-
-    def __init__(self, frame, (x,y,w,h)):
-        MotionModel.__init__(self, frame, (x,y,w,h))
-        self.filter = cv2.KalmanFilter(4, 2)
-        self.filter.transitionMatrix     = F
-        self.filter.measurementMatrix    = H
-        self.filter.processNoiseCov      = Q
-        self.filter.measurementNoiseCov  = R
-        self.filter.errorCovPost         = P
-        self.filter.statePost = np.array([[x], [y], [0.], [0.]])
-        self.hist = [self.filter.statePost]
-
-    def update(self, frame, (x,y,w,h)):
-        self.filter.predict()
-        self.filter.correct(np.array([[x], [y], [0.], [0.]]))
-        self.hist.append(self.filter.statePost)
-        return self.hist[-1]
-
-    def notfound(self, count, frames=None):
-        for i in range(count):
-            self.predict()
-            self.hist.append(self.filter.statePost)
-            self.count -= 1
-        return self.hist[-1] if self.count>0 else None
 
     def similarity(self, frame, (x,y,w,h)):
-        pass
+        (x, y) = (x+w/2, y+h)
+        ( _x, _y, _w, _h) = self.hist[-1]
+        (_dx,_dy,_dw,_dh) = self.velocity
+        Sigma = _w*_h/20000 * np.diag([1, 1, 1, 1])
+        c = [x-_x-_dx,y-_y-_dy,w-_w-_dw,h-_h-_dh]
+        probability = 1/sqrt(pow(2*pi, 4) * np.linalg.det(Sigma)) * exp(-1/2 * np.linalg.multi_dot([c, np.linalg.inv(Sigma), c]))
+        logger().debug("id {}: \nxhat | x=\n{}, \np={}".format(self.id, np.array([self.hist[-1], (x,y,w,h)]).transpose(), probability))
+        return probability
 
     def extract(self):
-        pass
-
-
-class TrackingModel(MotionModel):
-    """
-    model using OpenCV tracking API
-    """
-    create = cv2.TrackerKCF_create
-
-    def __init__(self, frame, bbox):
-        MotionModel.__init__(self, frame, bbox)
-        self.tracker = TrackingModel.create()
-        self.tracker.init(frame, bbox)
-        self.hist = [bbox]
-
-    def update(self, frame, bbox):
-        self.tracker.init(frame, bbox)
-        self.hist.append(bbox)
-        return bbox
-
-    def notfound(self, count, frames=None):
-        for i in range(count):
-            frame = frames[i]
-            (ok, bbox) = self.tracker.update(frame)
-            self.hist.append(bbox)
-            self.counter -= 1
-        return self.hist[-1] if self.counter>0 else None
-
-    def similarity(self, frame, bbox):
-        #return similarityInArea(self.hist[-1], bbox)
-        return crossEntropy(self.hist[-1], bbox)
-
-    def extract(self):
-        return [(x+w/2, y+h) for (x,y,w,h) in self.hist]
-
-
-def crossEntropy((x1,y1,w1,h1), (x2,y2,w2,h2)):
-    """
-    1: estimated, 2: actual
-    """
-    p = 1 / w2 / h2
-    q = 1 / w1 / h1
-    result = 0
-    for i in range(w2):
-        for j in range(h2):
-            point = (x2+i, y2+j)
-            if x1 <= point[0] <= x1+w1 and y1 <= point[1] <= y1+h1:
-                result -= p * log(q)
-            else:
-                pass
-    logger().debug("crossEntropy: {}".format(result))
-    return result
-
-
-def similarityInArea((x1,y1,w1,h1), (x2,y2,w2,h2)):
-    """
-    return S_{overlapped} / S_{bbox1}, [0, 1], greater is better
-    """
-    S1 = w1 * h1
-    if S1 == 0:
-        return int(x1 < x2 < x1+w1 and y1 < y2 < y1+h1)
-
-    def clamp(x, minVal, maxVal):
-        return sorted((x, minVal, maxVal))[1]
-
-    if x2 < x1:
-        w12 = clamp(x2+w2-x1, 0, w1)
-    else:
-        w12 = clamp(x1+w1-x2, 0, w2)
-
-    if y2 < y1:
-        h12 = clamp(y2+h2-y1, 0, h1)
-    else:
-        h12 = clamp(y1+h1-y2, 0, h2)
-
-    S12 = w12 * h12
-    return S12 / S1
+        traj = [(x, y, 0, 0) for (x,y,w,h) in self.hist]
+        traj[-1][2:] = self.velocity[:2]
+        return traj
 
