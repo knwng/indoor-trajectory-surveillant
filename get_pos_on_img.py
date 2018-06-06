@@ -2,9 +2,12 @@
 
 import cv2
 import os
+import argparse
 
-# img_root = './annotation/caliboration/Calib_4_A1_East_Pass_Seq'
-img_root = './annotation/caliboration/Calib_4_A1_South_Elevator_Seq'
+ap = argparse.ArgumentParser()
+ap.add_argument('--file', required=True)
+
+args = ap.parse_args()
 
 def show_mouse_pos(event, x, y, flags, param):
     '''
@@ -16,19 +19,13 @@ def show_mouse_pos(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDBLCLK:
         print('current pos {}'.format((x, y)))
 
-img_list = os.listdir(img_root)
+if not os.path.isfile(args.file):
+    print('{} is not a file'.format(args.file))
+    raise FileNotFoundError
+
 cv2.namedWindow('test')
 cv2.setMouseCallback('test', show_mouse_pos)
 
-for img_fn in img_list:
-    print('process img {}'.format(img_fn))
-    img = cv2.imread(os.path.join(img_root, img_fn))
-    while(cv2.waitKey(33) & 0xFF != ord('q')):
-        cv2.imshow('test', img)
-        
-'''
-while (key != 113):
+img = cv2.imread(args.file)
+while(cv2.waitKey(33) & 0xFF != ord('q')):
     cv2.imshow('test', img)
-    key = cv2.waitKey(33)
-    print('key {}'.format(key))
-'''
