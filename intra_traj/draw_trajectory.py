@@ -26,14 +26,15 @@ colors = itertools.cycle([(255,0,0), (0,255,0), (0,0,255)])
 
 
 class Trajectories(object):
-    def __init__(self, frame, bboxes, model):
+    def __init__(self, frame, instances, model):
         """
         frame       : image
         bboxes      : [(x,y,w,h)]
+        instances   : [ DetectedInstances ]
         model       : type, derived class of MotionModel
         """
         self.model = model
-        self.objects = [self.model(frame,b) for b in bboxes]
+        self.objects = [self.model(frame, i.bbox, i.identity) for i in instances]
         logger().info("{} new objects added".format(len(self.objects)))
 
     def autoremove(self, index, frame):
@@ -44,22 +45,23 @@ class Trajectories(object):
         """
         position = self.objects[index].notfound(frame)
         if position is None:
-            logger().info("objects {} lost, removed".format(self.objects[index].id))
+            logger().info("objects {} lost, removed".format(self.objects[index].ids[-1]))
             self.objects.pop(index)
             return True
         else:
             return False
 
-    def updateAll(self, frame, bboxes):
+    def updateAll(self, frame, instances):
         """
         update internal motion models
         maintain trajectories info (remove old ones, add new ones)
         frame       : image
         bboxes      : [(x,y,w,h)]
+        instances   : [ DetectedInstances ]
         """
         n = len(self.objects)
-        k = len(bboxes)
-        logger().debug("deciding {} bboxes on {} models".format(k, n))
+        k = len(instances)
+        logger().debug("deciding {} instances on {} models".format(k, n))
 
         if k == 0:  # no bounding box found
             # reverse order, cause some elements may be popped
@@ -68,7 +70,7 @@ class Trajectories(object):
             return
 
         elif n == 0:  # no model, init from bounding boxes
-            self.objects = [self.model(frame,b) for b in bboxes]
+            self.objects = [self.model(frame, i.bbox, i.identity) for i in instances]
             logger().info("{} new objects added".format(len(self.objects)))
             return
 
@@ -81,46 +83,47 @@ class Trajectories(object):
         likelyhood = np.zeros([n, k])
         for i in range(n):
             for j in range(k):
-                lh = self.objects[i].similarity(frame, bboxes[j])
+                #TODO: take re-id result into consideration
+                lh = self.objects[i].similarity(frame, instances[j].bbox, instances[j].identity)
                 likelyhood[i][j] = lh if lh>threshold else threshold
 
         probability = likelyhood
 
-        selectedBBox = [-1 for _ in self.objects]
-        maxS = selectedBBox
+        selectedInstance = [-1 for _ in self.objects]
+        maxS = selectedInstance
         maxL = 0
 
-        def DFS(i, selectedBBox):
+        def DFS(i, selectedInstance):
             if i == n:
-                ls = [likelyhood[ii][selectedBBox[ii]] for ii in range(n) if selectedBBox[ii]>=0]
+                ls = [likelyhood[ii][selectedInstance[ii]] for ii in range(n) if selectedInstance[ii]>=0]
 
                 # the more -1 it have, the lower its base is
-                L = pow(threshold, selectedBBox.count(-1))
+                L = pow(threshold, selectedInstance.count(-1))
 
                 # since there's no `prod`, use `exp . sum . (map log)` instead
                 L *= exp(sum(map(log, ls)))
-                logger().debug("combination: {}, likelyhood: {}".format(selectedBBox, L))
-                return [(selectedBBox, L)]
+                logger().debug("combination: {}, likelyhood: {}".format(selectedInstance, L))
+                return [(selectedInstance, L)]
 
             else:
                 result = []
                 for j in range(-1, k):
-                    if selectedBBox[:i].count(j)>0 and j!=-1:
+                    if selectedInstance[:i].count(j)>0 and j!=-1:
                         # we don't allow a bbox selected by multiple models
-#                        logger().debug("bbox {} has been selected in {}".format(j, selectedBBox[:i]))
+#                        logger().debug("bbox {} has been selected in {}".format(j, selectedInstance[:i]))
                         continue
     
                     if j!=-1 and likelyhood[i][j]<=threshold:  # I don't want this bbox
 #                        logger().debug("probability[{}][{}] <= threshold".format(i, j))
                         continue
     
-                    newSelection = list(selectedBBox)  # make a copy
+                    newSelection = list(selectedInstance)  # make a copy
                     newSelection[i] = j
                     result += DFS(i+1, newSelection)
                 return result
 
 
-        selections = DFS(0, selectedBBox)
+        selections = DFS(0, selectedInstance)
         maxIndex = np.argmax([l for (_,l) in selections])
         (maxS, maxL) = selections[maxIndex]
 
@@ -130,11 +133,11 @@ class Trajectories(object):
             if maxS[i] == -1:
                 self.autoremove(i, frame)
             else:
-                self.objects[i].update(frame, bboxes[maxS[i]])
+                self.objects[i].update(frame, instances[maxS[i]].bbox, instances[maxS[i]].identity)
 
         for j in range(k):
             if maxS.count(j) == 0:
-                self.objects.append(self.model(frame, bboxes[j]))
+                self.objects.append(self.model(frame, instances[j].bbox, instances[j].identity))
 
 
     def extractAll(self):
@@ -142,7 +145,8 @@ class Trajectories(object):
         extract trajectories of all motion models
         return      : [ (id, [(x,y)]) ]
         """
-        return [(o.id, o.extract()) for o in self.objects]
+        return [(o.ids[-1], o.extract()) for o in self.objects]
+
 
 def trajshow(image, trajs):
     """
@@ -191,8 +195,8 @@ def bboxesshow(image, bboxes):
         cv2.rectangle(image, (x,y), (x+w,y+h), (0,255,0))
 
 
-def drawTrajectory(bboxesFilename, videoFilename):
-    data = dataGenerator(videoFilename, bboxesFilename)
+def drawTrajectory(pklFilename, videoFilename):
+    data = dataGenerator(videoFilename, pklFilename)
     trajs = None
 
     global index
@@ -200,26 +204,29 @@ def drawTrajectory(bboxesFilename, videoFilename):
     # index     : int
     # frame     : image
     # bboxes    : [ (x,y,w,h) ]
-    for (index, frame, bboxes) in data:
+    for (index, frame, instances) in data:
         if not trajs:  # init motion models
-            trajs = Trajectories(frame, bboxes, KalmanFilterModel)
+            trajs = Trajectories(frame, instances, KalmanFilterModel)
         else:
-            trajs.updateAll(frame, bboxes)
+            trajs.updateAll(frame, instances)
 
         trajshow(frame, trajs.extractAll())
-        bboxesshow(frame, bboxes)
+        bboxesshow(frame, [i.bbox for i in instances])
         # show index on top-left corner
         cv2.putText(frame, str(index), (50,20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (50,170,50), 2)
 
         cv2.imshow("trajectories", frame)
-        cv2.waitKey(int(dt*1200))
+        cv2.waitKey(int(dt*100))
 
 
 if __name__ == '__main__':
     videoFilename = sys.argv[1]
-    bboxesFilename = sys.argv[2]
+    pklFilename = sys.argv[2]
+
     logging.basicConfig(level=logging.DEBUG)
-    drawTrajectory(bboxesFilename, videoFilename)
+
+    drawTrajectory(pklFilename, videoFilename)
+
     cv2.destroyAllWindows()
     #for (idx, bboxes) in detectedBBoxes("single_person_bboxes.txt"):
     #    print(idx)

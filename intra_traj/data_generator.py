@@ -3,46 +3,27 @@
 import cv2
 import re
 import logging
+import cPickle as pickle
 
 from config import *
 
 def logger():
     return logging.getLogger(__name__)
 
+
 def bboxesGenerator(filename):
     """
-    parse *_bboxes.txt
-    return      : generator( (x,y,w,h) )
+    return      : generator( FrameInstances )
     """
-    with open(filename,'r') as f:
-        currLines = []
-        currIdx   = None
+    with open(filename, 'rb') as f:
+        data = pickle.load(f)
+    return iter(data)
 
-        for line in f:
-            pat = re.compile(r"(\d+) \| (\d+) (\d+) (\d+) (\d+)")
-            (idx, x, xmax, y, ymax) = map(int, pat.match(line).groups())
-            w = xmax - x
-            h = ymax - y
-
-            if not currIdx:
-                currIdx = idx
-
-            if idx == currIdx:
-                currLines.append((x,y,w,h))
-            else:  # idx != currIdx
-                if currLines:
-                    yield (currIdx, currLines)
-                    currLines = []
-
-                skippedCount = (idx-currIdx-1) // fpd
-                for i in range(skippedCount):
-                    yield(currIdx + (i+1)*fpd, [])
-
-                currIdx = idx
-                currLines = [(x,y,w,h)]
-
-        if currLines:
-            yield (currIdx, currLines)
+    ## image has been multiplified
+    #for f in data:
+    #    for i in f.instances:
+    #        i.bbox = i.bbox / 2
+    #    yield f
 
 
 def framesGenerator(filename):
@@ -65,29 +46,29 @@ def framesGenerator(filename):
             yield (index, frame)
 
 
-def dataGenerator(video, bboxes):
+def dataGenerator(video, pkl):
     """
     return      : generator( (index, image, [(x,y,w,h)]) )
     """
     frames = framesGenerator(video)
-    bboxes = bboxesGenerator(bboxes)
+    bboxes = bboxesGenerator(pkl)
     
-    (index, b) = bboxes.next()
+    instances = bboxes.next()
     while True:
         (i, f) = frames.next()
-        if i == index:
+        if i == instances.timestamp:
             break
-    yield (index, f, b)
+    yield (i, f, instances.instances)
 
     while True:
         try:
-            (i1, b) = bboxes.next()
-            (i2, f) = frames.next()
+            instances = bboxes.next()
+            (i, f) = frames.next()
         except StopIteration:
             break
 
-        if i1 != i2:
+        if instances.timestamp != i:
             raise ValueError("i1 != i2")
 
-        yield (i1, f, b)
+        yield (i, f, instances.instances)
 
