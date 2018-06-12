@@ -174,8 +174,10 @@ def trajshow(image, mapimage, trajs):
     for (_,traj) in trajs:  # traj: [(x,y,dx,dy)]
         # trajectory
         traj = [(x,y) for (x,y,dx,dy,t) in traj]
+        # down sampling
+        traj = list(downsample(traj, 4))
         # smooth
-        traj = signal.medfilt2d(traj, kernel_size=(35,1))
+        traj = signal.medfilt2d(traj, kernel_size=(11,1))
 
         pairs = zip(traj, traj[1:])  # pairs: [((x1,y1),(x2,y2))]
         for ((x1,y1), (x2,y2)) in pairs:
@@ -183,10 +185,17 @@ def trajshow(image, mapimage, trajs):
             cv2.line(image, (x1,y1), (x2,y2), (255,0,0), 4)
             #cv2.line(mapimage, projectBack((x1,y1)), projectBack((x2,y2)), (255,0,0), 1)
 
-def downSample(xs, rate):
+def downsample(xs, rate):
     xs = iter(xs)
+    yield next(xs)
     while True:
-        xs = 0
+        try:
+            for i in range(rate):
+                x = next(xs)
+            yield x
+        except StopIteration:
+            break
+
 
 def _trajshow(image, trajs):
     """
