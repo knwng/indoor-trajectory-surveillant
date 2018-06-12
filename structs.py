@@ -25,3 +25,27 @@ class FrameInst(object):
                         self.identity,
                         self.id_candidates,
                         self.embedding))
+
+
+class DetectedInstance(object):
+    """
+    a single detected instance in a frame
+    bbox    : (x, y, w, h)
+    """
+    def __init__(self, cropped_img_url, bbox, identity, id_candidates, embedding):
+        self.cropped_img_url = cropped_img_url
+        self.bbox = bbox
+        self.identity = identity
+        self.id_candidates = id_candidates
+        self.embedding = embedding
+
+
+class FrameInstances(object):
+    """
+    all detected instances in a frame, along with other info
+    """
+    def __init__(self, timestamp, frame, instances):
+        self.timestamp = timestamp
+        self.frame = frame
+        self.instances = instances
+
