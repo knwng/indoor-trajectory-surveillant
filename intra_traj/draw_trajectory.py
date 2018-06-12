@@ -26,7 +26,7 @@ colors = itertools.cycle([(255,0,0), (0,255,0), (0,0,255)])
 
 
 class Trajectories(object):
-    def __init__(self, frame, instances, model):
+    def __init__(self, frame, instances, model, timestamp):
         """
         frame       : image
         bboxes      : [(x,y,w,h)]
@@ -34,18 +34,18 @@ class Trajectories(object):
         model       : type, derived class of MotionModel
         """
         self.model = model
-        self.objects = [self.model(frame, i.bbox, i.identity) for i in instances]
+        self.objects = [self.model(frame, i.bbox, i.identity, timestamp) for i in instances]
         # visible[i] == True means objects[i] can be detected in the screen
         self.visible = [True for _ in self.objects]
         logger().info("{} new objects added".format(len(self.objects)))
 
-    def autoremove(self, index, frame):
+    def autoremove(self, index, frame, timestamp):
         """
         self.objects[`index`] has been un-detected for one frame
         remove it if gets lost
         return      : whether it is removed
         """
-        position = self.objects[index].notfound(frame)
+        position = self.objects[index].notfound(frame, timestamp)
         if position is None:
             logger().info("objects {} lost, make it invisible".format(self.objects[index].ids[-1]))
             self.visible[index] = False
@@ -53,7 +53,7 @@ class Trajectories(object):
         else:
             return False
 
-    def updateAll(self, frame, instances):
+    def updateAll(self, frame, instances, timestamp):
         """
         update internal motion models
         maintain trajectories info (remove old ones, add new ones)
@@ -68,11 +68,11 @@ class Trajectories(object):
         if k == 0:  # no bounding box found
             # reverse order, cause some elements may be popped
             for i in range(len(self.objects)-1, -1, -1):
-                self.autoremove(i, frame)
+                self.autoremove(i, frame, timestamp)
             return
 
         elif n == 0:  # no model, init from bounding boxes
-            self.objects = [self.model(frame, i.bbox, i.identity) for i in instances]
+            self.objects = [self.model(frame, i.bbox, i.identity, timestamp) for i in instances]
             self.visible = [True for _ in self.objects]
             logger().info("{} new objects added".format(len(self.objects)))
             return
@@ -80,15 +80,16 @@ class Trajectories(object):
         # both bboex and self.objects are non-empty
         threshold = 1e-60
 
-        for i in range(n):
-            if self.visible[i]:
-                self.objects[i].predict()
+        if self.model is KalmanFilterModel:
+            for i in range(n):
+                if self.visible[i]:
+                    self.objects[i].predict()
 
         likelyhood = np.zeros([n, k])
         for i in range(n):
             for j in range(k):
                 (probability, p, q) = self.objects[i].similarity(frame, instances[j].bbox, instances[j].identity)
-                if (not self.visible[i]) and q==0:  # objects[i] has gone away, and another person comes in from the same passage
+                if False:# (not self.visible[i]) and q==0:  # objects[i] has gone away, and another person comes in from the same passage
                     likelyhood[i][j] = 0
                 else:
                     likelyhood[i][j] = probability if probability>threshold else threshold
@@ -137,14 +138,14 @@ class Trajectories(object):
 
         for i in range(n-1, -1, -1):
             if maxS[i] == -1:
-                self.autoremove(i, frame)
+                self.autoremove(i, frame, timestamp)
             else:
-                self.objects[i].update(frame, instances[maxS[i]].bbox, instances[maxS[i]].identity)
+                self.objects[i].update(frame, instances[maxS[i]].bbox, instances[maxS[i]].identity, timestamp)
                 self.visible[i] = True
 
         for j in range(k):
             if maxS.count(j) == 0:
-                self.objects.append(self.model(frame, instances[j].bbox, instances[j].identity))
+                self.objects.append(self.model(frame, instances[j].bbox, instances[j].identity, timestamp))
                 self.visible.append(True)
 
 
@@ -163,7 +164,7 @@ def trajshow(image, trajs):
     cv2.putText(image, str(len(trajs)), (100,20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (50,170,50), 2)
     for (_,traj) in trajs:  # traj: [(x,y,dx,dy)]
         # trajectory
-        traj = [(x,y) for (x,y,_,__) in traj]
+        traj = [(x,y) for (x,y,dx,dy,t) in traj]
         # smooth
         traj = signal.medfilt2d(traj, kernel_size=(29,1))
         pairs = zip(traj, traj[1:])  # pairs: [((x1,y1),(x2,y2))]
@@ -214,9 +215,9 @@ def drawTrajectory(pklFilename, videoFilename):
     # bboxes    : [ (x,y,w,h) ]
     for (index, frame, instances) in data:
         if not trajs:  # init motion models
-            trajs = Trajectories(frame, instances, KalmanFilterModel)
+            trajs = Trajectories(frame, instances, KalmanFilterModel, index)
         else:
-            trajs.updateAll(frame, instances)
+            trajs.updateAll(frame, instances, index)
 
         trajshow(frame, trajs.extractAll())
         bboxesshow(frame, [i.bbox for i in instances])
