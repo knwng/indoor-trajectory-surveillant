@@ -50,6 +50,10 @@ class Trajectories(object):
         if position is None:
             logger().info("objects {} lost, make it invisible".format(self.objects[index].ids[-1]))
             self.visible[index] = False
+            if len(self.objects[index].hist) < 10:
+                logger().warning("objects {}'s history is too short, removing it".format(self.objects[index].ids[-1]))
+                self.objects.pop(index)
+                self.visible.pop(index)
             return True
         else:
             return False
@@ -90,7 +94,7 @@ class Trajectories(object):
         likelyhood = np.zeros([n, k])
         for i in range(n):
             for j in range(k):
-                (probability, p, q) = self.objects[i].similarity(frame, instances[j].bbox, instances[j].identity)
+                (probability, p, q) = self.objects[i].similarity(frame, instances[j].bbox, instances[j].id_candidates)
                 if (not self.visible[i]) and q==0:  # objects[i] has gone away, and another person comes in from the same passage
                     likelyhood[i][j] = 0
                 else:
@@ -146,10 +150,12 @@ class Trajectories(object):
                 self.objects[i].update(frame, instances[maxS[i]].bbox, instances[maxS[i]].identity, timestamp)
                 self.visible[i] = True
 
+        # add new models
         for j in range(k):
             if maxS.count(j) == 0:
                 self.objects.append(self.model(frame, instances[j].bbox, instances[j].identity, timestamp))
                 self.visible.append(True)
+                logger().debug("add new model {}".format(instances[j].identity))
 
 
     def extractAll(self):
@@ -175,7 +181,7 @@ def trajshow(image, mapimage, trajs):
         for ((x1,y1), (x2,y2)) in pairs:
             (x1,x2,y1,y2) = map(int, (x1,x2,y1,y2))  # float -> int
             cv2.line(image, (x1,y1), (x2,y2), (255,0,0), 4)
-            cv2.line(mapimage, translate((x1,y1)), translate((x2,y2)), (255,0,0), 1)
+            #cv2.line(mapimage, projectBack((x1,y1)), projectBack((x2,y2)), (255,0,0), 1)
 
 def downSample(xs, rate):
     xs = iter(xs)
@@ -246,6 +252,14 @@ matrices = {
 matrix = None
 
 
+projectionMat = {
+        "seq_2.mp4": np.array([ [  0.0706, -2.0966, 563.1875 ]
+                              , [  0.1507, -0.5757,  34.5255 ]
+                              , [  0.0002, -0.0046,   1.0000 ]
+                              ])
+}
+
+
 def translate((x,y)):
     A = np.array([ [-0.3932,0.3398]
                  , [-0.1622,-0.0227]
@@ -257,8 +271,14 @@ def translate((x,y)):
     return (int(newX), int(newY))
 
 
+def projectBack((x,y)):
+    name = os.path.basename(sys.argv[1])
+    A = projectionMat[name]
+    [[x], [y], [w]] = np.dot(A, np.array([[x], [y], [1.0]]))
+    return (int(x/w), int(y/w))
+
 def drawTrajectory(pklFilename, videoFilename):
-    mapimage = cv2.imread("/home/zepp/Downloads/mapplus.png")
+    mapimage = cv2.imread("/home/zepp/Downloads/map.png")
 
     data = dataGenerator(videoFilename, pklFilename)
     trajs = None
@@ -286,7 +306,7 @@ def drawTrajectory(pklFilename, videoFilename):
         cv2.putText(frame, str(index), (50,20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (50,170,50), 2)
 
         cv2.imshow("trajectories", frame)
-        cv2.imshow("map", mapimg)
+        #cv2.imshow("map", mapimg)
         cv2.waitKey(int(dt*100))
 
 
