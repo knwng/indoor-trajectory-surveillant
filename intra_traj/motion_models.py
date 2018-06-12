@@ -118,7 +118,7 @@ class KalmanFilterModel(object):
         self.filter.processNoiseCov      = KalmanFilterModel.Q.copy()
         self.filter.measurementNoiseCov  = KalmanFilterModel.R.copy()
         self.filter.errorCovPost         = KalmanFilterModel.P.copy()
-        self.filter.statePost = np.array([[x+w/2], [y+h], [0.], [0.]])
+        self.filter.statePost = np.array([[x+w/2], [y+h], [0.], [0.]], dtype=np.float)
 
         self.hist = [(self.filter.statePost.copy(), timestamp)]
 

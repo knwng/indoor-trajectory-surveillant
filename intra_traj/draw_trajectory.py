@@ -4,6 +4,7 @@
 from __future__ import division
 from __future__ import print_function 
 
+import os
 import sys
 import cv2
 import numpy as np
@@ -68,7 +69,8 @@ class Trajectories(object):
         if k == 0:  # no bounding box found
             # reverse order, cause some elements may be popped
             for i in range(len(self.objects)-1, -1, -1):
-                self.autoremove(i, frame, timestamp)
+                if self.visible[i]:
+                    self.autoremove(i, frame, timestamp)
             return
 
         elif n == 0:  # no model, init from bounding boxes
@@ -89,7 +91,7 @@ class Trajectories(object):
         for i in range(n):
             for j in range(k):
                 (probability, p, q) = self.objects[i].similarity(frame, instances[j].bbox, instances[j].identity)
-                if False:# (not self.visible[i]) and q==0:  # objects[i] has gone away, and another person comes in from the same passage
+                if (not self.visible[i]) and q==0:  # objects[i] has gone away, and another person comes in from the same passage
                     likelyhood[i][j] = 0
                 else:
                     likelyhood[i][j] = probability if probability>threshold else threshold
@@ -138,8 +140,9 @@ class Trajectories(object):
 
         for i in range(n-1, -1, -1):
             if maxS[i] == -1:
-                self.autoremove(i, frame, timestamp)
-            else:
+                if self.visible[i]:
+                    self.autoremove(i, frame, timestamp)
+            else:  # maxS[i] != -1
                 self.objects[i].update(frame, instances[maxS[i]].bbox, instances[maxS[i]].identity, timestamp)
                 self.visible[i] = True
 
@@ -157,7 +160,7 @@ class Trajectories(object):
         return [(o.ids[-1], o.extract()) for (v,o) in zip(self.visible, self.objects) if v]
 
 
-def trajshow(image, trajs):
+def trajshow(image, mapimage, trajs):
     """
     trajs       : [ (id, [(x,y,dx,dy)]) ]
     """
@@ -166,12 +169,18 @@ def trajshow(image, trajs):
         # trajectory
         traj = [(x,y) for (x,y,dx,dy,t) in traj]
         # smooth
-        traj = signal.medfilt2d(traj, kernel_size=(29,1))
+        traj = signal.medfilt2d(traj, kernel_size=(35,1))
+
         pairs = zip(traj, traj[1:])  # pairs: [((x1,y1),(x2,y2))]
         for ((x1,y1), (x2,y2)) in pairs:
             (x1,x2,y1,y2) = map(int, (x1,x2,y1,y2))  # float -> int
             cv2.line(image, (x1,y1), (x2,y2), (255,0,0), 4)
+            cv2.line(mapimage, translate((x1,y1)), translate((x2,y2)), (255,0,0), 1)
 
+def downSample(xs, rate):
+    xs = iter(xs)
+    while True:
+        xs = 0
 
 def _trajshow(image, trajs):
     """
@@ -204,27 +213,80 @@ def bboxesshow(image, bboxes):
         cv2.rectangle(image, (x,y), (x+w,y+h), (0,255,0))
 
 
+def onEdge(image, (x,y,w,h)):
+    (height, width, _) = image.shape
+    eps = 15
+    return (x<=eps) or (y<=eps) or (x+w>=width-eps) or (y+h>=height-eps)
+
+
+matrices = {
+        "seq_1.mp4": (np.array([ [-0.0373,-0.2517]
+                               #, [0.0740,-0.0063]
+                               , [0.0740,-0.0063]
+                               ]),
+                      np.array([ [341.3177], [117.4532] ])),
+        "seq_2.mp4": (),
+        "seq_3.mp4": (np.array([ [-0.1571,-0.7888]
+                               , [0.0837,-0.0045]
+                               ]),
+                      np.array([ [1103.9], [90.4] ])),
+        "seq_4.mp4": (np.array([ [0.1032,0.4599]
+                               , [-0.0694,0.0167]
+                               ]),
+                      np.array([ [498.4242], [149.1891] ])),
+        "seq_5.mp4": (np.array([ [0.1615,0.6650]
+                               , [-0.1138,-0.0749]
+                               ]),
+                      np.array([ [446.2605], [248.8616] ])),
+        "seq_6.mp4": (np.array([ [0.1359,0.0463]
+                               , [-0.0112,0.4863]
+                               ]),
+                      np.array([ [800.5693], [-62.3029] ]))
+}
+matrix = None
+
+
+def translate((x,y)):
+    A = np.array([ [-0.3932,0.3398]
+                 , [-0.1622,-0.0227]
+                 ])
+    b = np.array([ [414.0402], [244.2235] ])
+    (A, b) = matrix
+    [[newX], [newY]] = np.dot(A, np.array([[x], [y]])) + b
+    newY = newY*3
+    return (int(newX), int(newY))
+
+
 def drawTrajectory(pklFilename, videoFilename):
+    mapimage = cv2.imread("/home/zepp/Downloads/mapplus.png")
+
     data = dataGenerator(videoFilename, pklFilename)
     trajs = None
 
     global index
+    global matrix
+
+    matrix = matrices[os.path.basename(videoFilename)]
 
     # index     : int
     # frame     : image
     # bboxes    : [ (x,y,w,h) ]
     for (index, frame, instances) in data:
         if not trajs:  # init motion models
-            trajs = Trajectories(frame, instances, KalmanFilterModel, index)
+            trajs = Trajectories(frame, [i for i in instances if not onEdge(frame, i.bbox)], KalmanFilterModel, index)
         else:
-            trajs.updateAll(frame, instances, index)
+            # remove bboxes laying on the edge
+            trajs.updateAll(frame, [i for i in instances if not onEdge(frame, i.bbox)], index)
 
-        trajshow(frame, trajs.extractAll())
+        mapimg = mapimage.copy()
+
+        trajshow(frame, mapimg, trajs.extractAll())
         bboxesshow(frame, [i.bbox for i in instances])
         # show index on top-left corner
         cv2.putText(frame, str(index), (50,20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (50,170,50), 2)
 
         cv2.imshow("trajectories", frame)
+        cv2.imshow("map", mapimg)
         cv2.waitKey(int(dt*100))
 
 
