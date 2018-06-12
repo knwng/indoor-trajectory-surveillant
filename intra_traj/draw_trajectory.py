@@ -175,7 +175,7 @@ def trajshow(image, mapimage, trajs):
         # trajectory
         traj = [(x,y) for (x,y,dx,dy,t) in traj]
         # down sampling
-        traj = list(downsample(traj, 4))
+        traj = list(downsample(traj, 6))
         # smooth
         traj = signal.medfilt2d(traj, kernel_size=(11,1))
 
@@ -183,7 +183,7 @@ def trajshow(image, mapimage, trajs):
         for ((x1,y1), (x2,y2)) in pairs:
             (x1,x2,y1,y2) = map(int, (x1,x2,y1,y2))  # float -> int
             cv2.line(image, (x1,y1), (x2,y2), (255,0,0), 4)
-            #cv2.line(mapimage, projectBack((x1,y1)), projectBack((x2,y2)), (255,0,0), 1)
+            cv2.line(mapimage, projectBack((x1,y1)), projectBack((x2,y2)), (255,0,0), 1)
 
 def downsample(xs, rate):
     xs = iter(xs)
@@ -262,10 +262,35 @@ matrix = None
 
 
 projectionMat = {
-        "seq_2.mp4": np.array([ [  0.0706, -2.0966, 563.1875 ]
-                              , [  0.1507, -0.5757,  34.5255 ]
-                              , [  0.0002, -0.0046,   1.0000 ]
-                              ])
+        "seq_1.mp4": np.array([ [  0.0801,  -0.5200, -93.1937 ]
+                              , [ -0.1391,  -0.6606, 147.5483 ]
+                              , [  0.0001,  -0.0053,   1.0000 ]
+                              ]) ,
+
+        "seq_2.mp4": np.array([ [  0.0706,  -2.0966, 563.1875 ]
+                              , [  0.1507,  -0.5757,  34.5255 ]
+                              , [  0.0002,  -0.0046,   1.0000 ]
+                              ]) ,
+
+        "seq_3.mp4": np.array([ [ -0.1376,  -1.2041,   4264.4 ]
+                              , [  0.9145,   1.2953,-123.5846 ]
+                              , [  0.0001,   0.0133,   1.0000 ]
+                              ]) ,
+
+        "seq_4.mp4": np.array([ [  0.0565,  -5.3918,   1080.9 ]
+                              , [  0.2242,  -0.9058,  95.9198 ]
+                              , [  0.0001,  -0.0061,   1.0000 ]
+                              ]) ,
+
+        "seq_5.mp4": np.array([ [  0.9453,  -7.8280,   1164.7 ]
+                              , [  0.3612,  -0.9651, -86.7122 ]
+                              , [  0.0010,  -0.0080,   1.0000 ]
+                              ]) ,
+
+        "seq_6.mp4": np.array([ [ -0.0446,  -4.3285,   1083.2 ]
+                              , [  0.0745,  -1.2872, 372.7987 ]
+                              , [  0.0001,  -0.0045,   1.0000 ]
+                              ]) ,
 }
 
 
@@ -315,7 +340,7 @@ def drawTrajectory(pklFilename, videoFilename):
         cv2.putText(frame, str(index), (50,20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (50,170,50), 2)
 
         cv2.imshow("trajectories", frame)
-        #cv2.imshow("map", mapimg)
+        cv2.imshow("map", mapimg)
         cv2.waitKey(int(dt*100))
 
 
