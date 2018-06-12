@@ -35,6 +35,8 @@ class Trajectories(object):
         """
         self.model = model
         self.objects = [self.model(frame, i.bbox, i.identity) for i in instances]
+        # visible[i] == True means objects[i] can be detected in the screen
+        self.visible = [True for _ in self.objects]
         logger().info("{} new objects added".format(len(self.objects)))
 
     def autoremove(self, index, frame):
@@ -45,8 +47,8 @@ class Trajectories(object):
         """
         position = self.objects[index].notfound(frame)
         if position is None:
-            logger().info("objects {} lost, removed".format(self.objects[index].ids[-1]))
-            self.objects.pop(index)
+            logger().info("objects {} lost, make it invisible".format(self.objects[index].ids[-1]))
+            self.visible[index] = False
             return True
         else:
             return False
@@ -71,6 +73,7 @@ class Trajectories(object):
 
         elif n == 0:  # no model, init from bounding boxes
             self.objects = [self.model(frame, i.bbox, i.identity) for i in instances]
+            self.visible = [True for _ in self.objects]
             logger().info("{} new objects added".format(len(self.objects)))
             return
 
@@ -78,14 +81,17 @@ class Trajectories(object):
         threshold = 1e-60
 
         for i in range(n):
-            self.objects[i].predict()
+            if self.visible[i]:
+                self.objects[i].predict()
 
         likelyhood = np.zeros([n, k])
         for i in range(n):
             for j in range(k):
-                #TODO: take re-id result into consideration
-                lh = self.objects[i].similarity(frame, instances[j].bbox, instances[j].identity)
-                likelyhood[i][j] = lh if lh>threshold else threshold
+                (probability, p, q) = self.objects[i].similarity(frame, instances[j].bbox, instances[j].identity)
+                if (not self.visible[i]) and q==0:  # objects[i] has gone away, and another person comes in from the same passage
+                    likelyhood[i][j] = 0
+                else:
+                    likelyhood[i][j] = probability if probability>threshold else threshold
 
         probability = likelyhood
 
@@ -134,10 +140,12 @@ class Trajectories(object):
                 self.autoremove(i, frame)
             else:
                 self.objects[i].update(frame, instances[maxS[i]].bbox, instances[maxS[i]].identity)
+                self.visible[i] = True
 
         for j in range(k):
             if maxS.count(j) == 0:
                 self.objects.append(self.model(frame, instances[j].bbox, instances[j].identity))
+                self.visible.append(True)
 
 
     def extractAll(self):
@@ -145,7 +153,7 @@ class Trajectories(object):
         extract trajectories of all motion models
         return      : [ (id, [(x,y)]) ]
         """
-        return [(o.ids[-1], o.extract()) for o in self.objects]
+        return [(o.ids[-1], o.extract()) for (v,o) in zip(self.visible, self.objects) if v]
 
 
 def trajshow(image, trajs):
@@ -157,7 +165,7 @@ def trajshow(image, trajs):
         # trajectory
         traj = [(x,y) for (x,y,_,__) in traj]
         # smooth
-        traj = signal.medfilt2d(traj, kernel_size=(3,1))
+        traj = signal.medfilt2d(traj, kernel_size=(29,1))
         pairs = zip(traj, traj[1:])  # pairs: [((x1,y1),(x2,y2))]
         for ((x1,y1), (x2,y2)) in pairs:
             (x1,x2,y1,y2) = map(int, (x1,x2,y1,y2))  # float -> int

@@ -37,7 +37,7 @@ class KalmanFilterModel(object):
     # initial covariance
     P = np.diag([2.1, 2.1, 4., 4.])
 
-    counter = 60
+    counter = 120
 
     def __init__(self, frame, (x,y,w,h), identity):
         self.ids = [identity]
@@ -71,6 +71,11 @@ class KalmanFilterModel(object):
         return self.hist[-1]
 
     def notfound(self, frame=None):
+        # slow down
+        decay = 0.75
+        self.filter.statePost[2:] = self.filter.statePost[2:] * decay
+        self.filter.statePre[2:] = self.filter.statePre[2:] * decay
+
         self.hist.append(self.filter.statePost.copy())
         self.counter -= 1
         return self.hist[-1] if self.counter>0 else None
@@ -85,11 +90,11 @@ class KalmanFilterModel(object):
         # probability based on re-id
         q = self.ids.count(identity) / len(self.ids)
         # take both into consideration
-        a = 1e-6
+        a = 1e-4
         probability = (1-a)*p + a*q
         logger().debug("id {}: \n|P|=\n{}, \nxhat | x=\n{}, \np={}\nq={}\nprobability={}".format(self.ids[-1], Sigma, np.hstack([mu, mu+centerized]), p, q, probability))
         #TODO: return real probability
-        return probability
+        return (probability, p, q)
 
     def extract(self):
         return [(x,y,dx,dy) for [[x],[y],[dx],[dy]] in self.hist]
