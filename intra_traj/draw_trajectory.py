@@ -50,7 +50,9 @@ class Trajectories(object):
         if position is None:
             logger().info("objects {} lost, make it invisible".format(self.objects[index].ids[-1]))
             self.visible[index] = False
-            if len(self.objects[index].hist) < 10:
+            self.objects[index].hist.append([])
+            logger().debug("object {} has {} part(s) after truncation".format(index, len(self.objects[index].hist)))
+            if len([1 for traj in self.objects[index].hist for p in traj]) < 10:
                 logger().warning("objects {}'s history is too short, removing it".format(self.objects[index].ids[-1]))
                 self.objects.pop(index)
                 self.visible.pop(index)
@@ -163,27 +165,59 @@ class Trajectories(object):
         extract trajectories of all motion models
         return      : [ (id, [(x,y)]) ]
         """
-        return [(o.ids[-1], o.extract()) for (v,o) in zip(self.visible, self.objects) if v]
+        return [(o.color, o.extract()) for (v,o) in zip(self.visible, self.objects) if v]
 
+
+def distance((x1,y1), (x2,y2)):
+    """
+    simple function to calculate \sqrt{||p1-p2||^2}
+    """
+    dist = np.linalg.norm([x1-x2, y1-y2])
+    logger().debug("distance: {}".format(dist))
+    return dist
+
+
+def forbidden((x,y)):
+    """
+    checks whether (x,y) on image plane locates in forbidden zone
+    """
+    (newX, newY) = projectBack((x,y))
+    dangerous = newX>=908 and newX<=980 and newY>=160
+    logger().debug("checking whether {}->{} is in forbidden zone, result: {}".format((x,y), (newX,newY), dangerous))
+    return dangerous
 
 def trajshow(image, mapimage, trajs):
     """
-    trajs       : [ (id, [(x,y,dx,dy)]) ]
+    trajs       : [ (color, [ [(x,y,dx,dy,t)] ]) ]
     """
     cv2.putText(image, str(len(trajs)), (100,20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (50,170,50), 2)
-    for (_,traj) in trajs:  # traj: [(x,y,dx,dy)]
-        # trajectory
-        traj = [(x,y) for (x,y,dx,dy,t) in traj]
-        # down sampling
-        traj = list(downsample(traj, 6))
-        # smooth
-        traj = signal.medfilt2d(traj, kernel_size=(11,1))
+    for (color, objectTrajs) in trajs:  # objectTrajs: different trajectories of the same object
+        last = (-100, -100)  # last trajectory's ending point
 
-        pairs = zip(traj, traj[1:])  # pairs: [((x1,y1),(x2,y2))]
-        for ((x1,y1), (x2,y2)) in pairs:
-            (x1,x2,y1,y2) = map(int, (x1,x2,y1,y2))  # float -> int
-            cv2.line(image, (x1,y1), (x2,y2), (255,0,0), 4)
-            cv2.line(mapimage, projectBack((x1,y1)), projectBack((x2,y2)), (255,0,0), 1)
+        logger().debug("trajectory has {} part(s)".format(len(objectTrajs)))
+
+        for traj in objectTrajs:
+            if distance(last, traj[0][0:2]) < 50:
+                # come in again
+                cv2.putText(mapimage, "anomaly: lost", (150,400), cv2.FONT_HERSHEY_SIMPLEX, 1, color)
+
+            last = traj[-1][0:2]
+
+            if forbidden(last):
+                cv2.putText(mapimage, "anomaly: entered forbidden zone", (150,370), cv2.FONT_HERSHEY_SIMPLEX, 1, color)
+
+            # trajectory
+            traj = [(x,y) for (x,y,dx,dy,t) in traj]
+            # down sampling
+            traj = list(downsample(traj, 6))
+            # smooth
+            traj = signal.medfilt2d(traj, kernel_size=(11,1))
+    
+            pairs = zip(traj, traj[1:])  # pairs: [((x1,y1),(x2,y2))]
+            for ((x1,y1), (x2,y2)) in pairs:
+                (x1,x2,y1,y2) = map(int, (x1,x2,y1,y2))  # float -> int
+                cv2.line(image, (x1,y1), (x2,y2), color, 4)
+                cv2.line(mapimage, projectBack((x1,y1)), projectBack((x2,y2)), color, 1)
 
 def downsample(xs, rate):
     xs = iter(xs)
@@ -314,6 +348,13 @@ def projectBack((x,y)):
 def drawTrajectory(pklFilename, videoFilename):
     mapimage = cv2.imread("/home/zepp/Downloads/map.png")
 
+    fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+    trajVideoFilename = os.path.join(os.path.dirname(pklFilename), os.path.basename(videoFilename) + "_traj.mp4")
+    mapVideoFilename = os.path.join(os.path.dirname(pklFilename), os.path.basename(videoFilename) + "_map.mp4")
+    logger().info("writing video to {} and {}".format(trajVideoFilename, mapVideoFilename))
+    trajVideo = cv2.VideoWriter(trajVideoFilename, fourcc, 30.0, (1280,720))
+    mapVideo = cv2.VideoWriter(mapVideoFilename, fourcc, 30.0, (1135,405))
+
     data = dataGenerator(videoFilename, pklFilename)
     trajs = None
 
@@ -342,6 +383,12 @@ def drawTrajectory(pklFilename, videoFilename):
         cv2.imshow("trajectories", frame)
         cv2.imshow("map", mapimg)
         cv2.waitKey(int(dt*100))
+        #trajVideo.write(frame)
+        #mapVideo.write(mapimg)
+        #cv2.waitKey(1)
+
+    trajVideo.release()
+    mapVideo.release()
 
 
 if __name__ == '__main__':

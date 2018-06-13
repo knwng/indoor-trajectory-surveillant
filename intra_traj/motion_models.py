@@ -6,6 +6,7 @@ import numpy as np
 import logging
 import cv2
 from math import *
+from itertools import cycle
 
 from config import *
 
@@ -16,6 +17,8 @@ dt = 1/25 * fpd
 def logger():
     return logging.getLogger(__name__)
 
+
+colors = cycle([ (255,0,0), (0,0,255) ])
 
 class KalmanFilterModel(object):
     """
@@ -44,6 +47,8 @@ class KalmanFilterModel(object):
 
         self.counter = KalmanFilterModel.counter
 
+        self.color = next(colors)
+
         self.filter = cv2.KalmanFilter(4, 2)
         self.filter.transitionMatrix     = KalmanFilterModel.F
         self.filter.measurementMatrix    = KalmanFilterModel.H
@@ -52,7 +57,7 @@ class KalmanFilterModel(object):
         self.filter.errorCovPost         = KalmanFilterModel.P.copy()
         self.filter.statePost = np.array([[x+w/2], [y+h], [0.], [0.]], dtype=np.float)
 
-        self.hist = [(self.filter.statePost.copy(), timestamp)]
+        self.hist = [ [(self.filter.statePost.copy(), timestamp)] ]
 
     def predict(self):
         logger().debug("id {}: |P|={}".format(self.ids[-1], np.linalg.det(self.filter.errorCovPost)))
@@ -69,8 +74,8 @@ class KalmanFilterModel(object):
 
         #self.filter.predict()
         self.filter.correct(np.array([[x+w/2], [y+h]], dtype=np.float))
-        self.hist.append((self.filter.statePost.copy(), timestamp))
-        return self.hist[-1][0]
+        self.hist[-1].append((self.filter.statePost.copy(), timestamp))
+        return self.hist[-1][-1][0]
 
     def notfound(self, frame, timestamp):
         # slow down
@@ -78,9 +83,9 @@ class KalmanFilterModel(object):
         self.filter.statePost[2:] = self.filter.statePost[2:] * decay
         self.filter.statePre[2:] = self.filter.statePre[2:] * decay
 
-        self.hist.append((self.filter.statePost.copy(), timestamp))
+        self.hist[-1].append((self.filter.statePost.copy(), timestamp))
         self.counter -= 1
-        return self.hist[-1][0] if self.counter>0 else None
+        return self.hist[-1][-1][0] if self.counter>0 else None
 
     def similarity(self, frame, (x,y,w,h), identities):
         # probability based on multidimensional normal distribution
@@ -101,6 +106,7 @@ class KalmanFilterModel(object):
         return (probability, p, q)
 
     def extract(self):
-        return [(x,y,dx,dy,t) for ([[x],[y],[dx],[dy]], t) in self.hist]
+        logger().debug("self.hist has {} part(s)".format(len(self.hist)))
+        return [[(x,y,dx,dy,t) for ([[x],[y],[dx],[dy]], t) in trajectory] for trajectory in self.hist]
 
 
