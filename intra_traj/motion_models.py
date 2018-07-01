@@ -18,7 +18,13 @@ def logger():
     return logging.getLogger(__name__)
 
 
-colors = cycle([ (255,0,0), (0,0,255) ])
+colors = cycle([ (255,0,0)  # blue
+               , (0,0,255)  # red
+               , (0,255,255)  # yellow
+               , (0,255,0)  # green
+               , (255,0,139)  # purple
+               , (0,165,255)  # orange
+               , ])
 
 class KalmanFilterModel(object):
     """
@@ -40,7 +46,7 @@ class KalmanFilterModel(object):
     # initial covariance
     P = np.diag([2.1, 2.1, 4., 4.])
 
-    counter = 120
+    counter = 200
 
     def __init__(self, frame, (x,y,w,h), identity, timestamp):
         self.ids = [int(identity)]

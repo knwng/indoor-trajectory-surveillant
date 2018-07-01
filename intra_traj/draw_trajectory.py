@@ -186,6 +186,18 @@ def forbidden((x,y)):
     logger().debug("checking whether {}->{} is in forbidden zone, result: {}".format((x,y), (newX,newY), dangerous))
     return dangerous
 
+
+def angle((x1,y1), (x2,y2)):
+    p1 = (x1,y1)
+    p2 = (x2,y2)
+    if (x1==0 and y1==0) or (x2==0 and y2==0):
+        cosine = 1
+    else:
+        cosine = np.dot(p1,p2) / np.linalg.norm(p1) / np.linalg.norm(p2)
+    logger().debug("cosine between {} and {}: {}".format(p1,p2,cosine))
+    return cosine
+
+
 def trajshow(image, mapimage, trajs):
     """
     trajs       : [ (color, [ [(x,y,dx,dy,t)] ]) ]
@@ -209,12 +221,25 @@ def trajshow(image, mapimage, trajs):
             # trajectory
             traj = [(x,y) for (x,y,dx,dy,t) in traj]
             # down sampling
-            traj = list(downsample(traj, 6))
+            traj = list(downsample(traj, 10))
             # smooth
             traj = signal.medfilt2d(traj, kernel_size=(11,1))
     
             pairs = zip(traj, traj[1:])  # pairs: [((x1,y1),(x2,y2))]
+            prevV = (0,0)
+            suspicious = 0
             for ((x1,y1), (x2,y2)) in pairs:
+                if angle(prevV, (x2-x1, y2-y1)) < cos(3.5*pi/7):
+                    cv2.putText(mapimage, "anomaly: lost", (150,400), cv2.FONT_HERSHEY_SIMPLEX, 1, color)
+                prevV = (x2-x1, y2-y1)
+
+#                if np.linalg.norm(prevV) < 2:
+#                    suspicious += 1
+#                    if suspicious > 20:
+#                        cv2.putText(mapimage, "anomaly: suspicious", (150,340), cv2.FONT_HERSHEY_SIMPLEX, 1, color)
+#                else:
+#                    suspicious = 0
+
                 (x1,x2,y1,y2) = map(int, (x1,x2,y1,y2))  # float -> int
                 cv2.line(image, (x1,y1), (x2,y2), color, 4)
                 cv2.line(mapimage, projectBack((x1,y1)), projectBack((x2,y2)), color, 1)
@@ -270,7 +295,6 @@ def onEdge(image, (x,y,w,h)):
 
 matrices = {
         "seq_1.mp4": (np.array([ [-0.0373,-0.2517]
-                               #, [0.0740,-0.0063]
                                , [0.0740,-0.0063]
                                ]),
                       np.array([ [341.3177], [117.4532] ])),
@@ -328,17 +352,6 @@ projectionMat = {
 }
 
 
-def translate((x,y)):
-    A = np.array([ [-0.3932,0.3398]
-                 , [-0.1622,-0.0227]
-                 ])
-    b = np.array([ [414.0402], [244.2235] ])
-    (A, b) = matrix
-    [[newX], [newY]] = np.dot(A, np.array([[x], [y]])) + b
-    newY = newY*3
-    return (int(newX), int(newY))
-
-
 def projectBack((x,y)):
     name = os.path.basename(sys.argv[1])
     A = projectionMat[name]
@@ -375,17 +388,19 @@ def drawTrajectory(pklFilename, videoFilename):
 
         mapimg = mapimage.copy()
 
+        # draw trajectories on this frame, as well as the map
         trajshow(frame, mapimg, trajs.extractAll())
+        # draw bbox provided by upstream
         bboxesshow(frame, [i.bbox for i in instances])
         # show index on top-left corner
         cv2.putText(frame, str(index), (50,20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (50,170,50), 2)
 
-        cv2.imshow("trajectories", frame)
-        cv2.imshow("map", mapimg)
-        cv2.waitKey(int(dt*100))
-        #trajVideo.write(frame)
-        #mapVideo.write(mapimg)
-        #cv2.waitKey(1)
+        #cv2.imshow("trajectories", frame)
+        #cv2.imshow("map", mapimg)
+        #cv2.waitKey(int(dt*100))
+        trajVideo.write(frame)
+        mapVideo.write(mapimg)
+        cv2.waitKey(1)
 
     trajVideo.release()
     mapVideo.release()
